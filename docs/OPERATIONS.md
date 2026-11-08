@@ -161,6 +161,7 @@ With Quick Start+ the TV keeps answering on the network (port 3001, sometimes 99
 | https://localhost:47990 | Apollo web UI (admin login; PIN pairing; Clients → permissions; Applications) |
 | Service `ApolloService` | starts automatically, before login |
 | Driver `ViGEmBus` | virtual Xbox controller for controllers connected to the TV |
+| Desktop shortcuts **TV On** / **TV Off** | run `pc\tv-power.cmd on\|off` → `ssh l590` → `scripts/tv-on.sh` / `tv-off.sh`. Recreate with `powershell -ExecutionPolicy Bypass -File pc\make-shortcuts.ps1` (uses Windows OpenSSH and the `l590` alias from `%USERPROFILE%\.ssh\config`; override with env `TVWAKE_HELPER_SSH`). |
 | `pc\setup-windows.ps1` (this repo) | run once as admin; already done on MoralMe (Private network, ping rule, Fast Startup off, NIC wake, no sign-in after sleep, password sign-in allowed) |
 | Steam | in autostart (`-silent`), remembers login |
 
@@ -194,9 +195,20 @@ Open:
       the L590 worked in an earlier setup). BIOS ErP status not checked.
 - [ ] **Windows auto-login**: Autologon did not work (Microsoft account). Without it, after a cold
       boot you log in on the streamed login screen; Steam starts after that.
-- [ ] **Image quality**: Moonlight defaulted to 10 Mbit/s, and Apollo captured the 3440x1440 monitor.
-      To do: Moonlight 4K, 60 (or 120) fps, HEVC, 50–80 Mbit/s; Apollo → Steam Big Picture →
-      "Always use Virtual Display". Verify in `sunshine.log` (`Capture size`, `Client Requested bitrate`).
+- [x] **Image quality** (fixed 2026-11-08). The starting state was Moonlight at 1080p / 10 Mbit/s and Apollo capturing
+      the 3440x1440 monitor, with Big Picture opening on the monitor. The working setup:
+      - Moonlight: 3840x2160, 120 fps (60 is sharper at the same bitrate), **65 Mbit/s = the maximum
+        Moonlight allows on webOS**, H.265 on, AV1 off (the RTX 3090 cannot encode AV1), HDR off.
+      - Apollo → Applications → Steam Big Picture → **Always create Virtual Display** (`"virtual-display": true`).
+      - Apollo → Audio/Video → Advanced display device options → **Device configuration =
+        "Activate the display and make it primary"** (`dd_configuration_option = ensure_primary`
+        in `sunshine.conf`). Without it, Steam opens on the monitor (the primary display) and the TV shows an empty desktop.
+      - Verified in `sunshine.log`: `Capture size 3840x2160`, `Display refresh rate [120Hz]`; the virtual
+        display is primary during the stream and the monitor stays on.
+      - Start apps **from Moonlight**, not from Apollo's web UI. A web-UI launch creates the virtual display
+        in the fallback mode (1920x1080x60), and the TV then *resumes* that session. If it happens:
+        Quit the app in Moonlight and start it again.
+- [ ] Steam did not start from autostart once (Run entry exists). Check Task Manager → Startup apps.
 - [ ] **Direct start into Big Picture**: needs the numeric app ID from Moonlight's app info
       dialog; then in `.env`:
       `STREAM_APP_PARAMS='{"host_uuid":"A4ED6DC5-4E97-DA21-C08C-416F2459E2BF","host_app_id":<ID>}'`
