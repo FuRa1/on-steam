@@ -54,7 +54,9 @@ scripts/             deploy.sh, install-agent.sh, build-tv.sh, install-tv.sh, se
                      devmode.sh, gen-secret.sh, render_tv.py, make-icons.py, lib.sh,
                      agent-cli.sh (wake flow from a terminal), pc-on.sh, tv-on.sh, tv-off.sh
 systemd/             agent service, devmode service + timer (templates)
-pc/                  setup-windows.ps1 (one-time Windows setup, run as admin)
+pc/                  setup-windows.ps1 (one-time Windows setup, run as admin),
+                     set-autologon.ps1 (auto-login, also for Microsoft accounts)
+mac/                 make-tv-shortcuts.sh (TV On / TV Off in the macOS Shortcuts app)
 docs/OPERATIONS.md   runbook: commands, verified device facts, file locations, recovery
 .env.example         every setting, commented
 ```
@@ -119,7 +121,13 @@ reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /v Hiberbo
    Hello sign-in…*
 2. `Win+R` → `netplwiz` → untick *Users must enter a user name and password* → enter your password.
    (Or use Microsoft's [Sysinternals Autologon](https://learn.microsoft.com/sysinternals/downloads/autologon).)
-3. Sign-in options → *If you've been away, when should Windows require you to sign in again?* → **Never**.
+   **Microsoft account:** the password is the *account* password, not the Windows Hello PIN. With the
+   PIN, sign-in fails and Windows silently resets auto-login. `pc\set-autologon.ps1` (admin) checks the
+   password first and then sets it through Autologon:
+   `powershell -ExecutionPolicy Bypass -File pc\set-autologon.ps1`
+4. Make sure Steam is actually enabled in Task Manager → *Startup apps* (a Run entry can exist but be
+   disabled there).
+5. Sign-in options → *If you've been away, when should Windows require you to sign in again?* → **Never**.
 
 Note: anyone with physical access to the PC gets into your account.
 

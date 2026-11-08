@@ -5,7 +5,7 @@ the real devices (2026-11-08). Setup steps and background are in the [README](..
 this file covers day-to-day commands, where things live, and what works and what doesn't.
 
 **Secrets are not in the repo.** `.env` (with `SHARED_SECRET`) is git-ignored. It lives on the
-workstation (`C:\workspace\on-steam\.env`) and on the helper (`~/tv-wake-launcher/.env`, mode 600).
+workstation (`C:\workspace\on-steam\.env` on the PC; the MacBook checkout keeps it as `env`, untracked) and on the helper (`~/tv-wake-launcher/.env`, mode 600).
 If both copies are lost: `cp .env.example .env`, `scripts/gen-secret.sh --write`, fill in the
 values below, then `scripts/deploy.sh agent tv`.
 
@@ -95,9 +95,30 @@ scripts/deploy.sh agent tv     # both
 Tests: on the helper `cd agent && .venv/bin/python -m pytest -q` (63 tests);
 `node tv-app/tests/hmac-test.js`.
 
+### From the MacBook (verified 2026-11-09)
+
+The MacBook (`192.168.1.79` at home, Tailscale everywhere) reaches all three devices:
+
+```sh
+ssh l590                                         # helper (Tailscale)
+ssh moralme                                      # gaming PC, user grevt, admin shell (Windows OpenSSH, Tailscale)
+ssh lgtv                                         # TV directly (home LAN only)
+ssh lgtv-remote                                  # TV through the helper (ProxyJump l590), works away from home
+ssh -tt lgtv 'luna-send-pub ...'                 # luna-send-pub needs a TTY
+```
+`lgtv`/`lgtv-remote` are entries in `~/.ssh/config` (port 9922, user `prisoner`, `+ssh-rsa`) with the
+key `~/.ssh/tvwake_tv` copied from the helper. PowerShell over ssh to the PC: quoting through cmd breaks
+easily, so pipe the script on stdin: `ssh moralme 'powershell -NoProfile -Command -' <<'EOF' ... EOF`.
+Don't run GUI tools over that ssh (e.g. `autologon /?` opens an invisible window and hangs).
+
+**TV On / TV Off in the Shortcuts app**: `mac/make-tv-shortcuts.sh` builds both, signs them
+(`shortcuts sign`) and opens them for import (click "Add Shortcut"). They run `tv-on.sh` / `tv-off.sh`
+on the helper over ssh. Needs Shortcuts → Settings → Advanced → "Allow Running Scripts".
+
 ## 4. SSH to the TV: what is allowed (webOS 26, verified)
 
 Login: `ssh -i ~/.ssh/tvwake_tv -p 9922 -o PubkeyAcceptedAlgorithms=+ssh-rsa -o HostKeyAlgorithms=+ssh-rsa prisoner@192.168.1.111`
+(from the MacBook: `ssh lgtv`)
 (user `prisoner`, group `jailer`; the TV only offers old ssh-rsa).
 
 **`luna-send-pub` prints its reply only with a terminal**: always use `ssh -tt` for Luna
@@ -163,7 +184,9 @@ With Quick Start+ the TV keeps answering on the network (port 3001, sometimes 99
 | Driver `ViGEmBus` | virtual Xbox controller for controllers connected to the TV |
 | Desktop shortcuts **TV On** / **TV Off** | run `pc\tv-power.cmd on\|off` → `ssh l590` → `scripts/tv-on.sh` / `tv-off.sh`. Recreate with `powershell -ExecutionPolicy Bypass -File pc\make-shortcuts.ps1` (uses Windows OpenSSH and the `l590` alias from `%USERPROFILE%\.ssh\config`; override with env `TVWAKE_HELPER_SSH`). |
 | `pc\setup-windows.ps1` (this repo) | run once as admin; already done on MoralMe (Private network, ping rule, Fast Startup off, NIC wake, no sign-in after sleep, password sign-in allowed) |
-| Steam | in autostart (`-silent`), remembers login |
+| Steam | Run entry `steam.exe -silent`, remembers login. **But** (2026-11-09) every HKCU Run entry is marked disabled in `StartupApproved\Run` (value `01 00 00 00`), so after auto-login nothing from it starts, Steam included. Fix: Task Manager → Startup apps → Steam → Enable, or a logon task in Task Scheduler. |
+| Auto-login | Sysinternals Autologon (winget), set with `pc\set-autologon.ps1`: user `grevtsov.b@protonmail.com`, domain `MicrosoftAccount`, password stored as an LSA secret. Off again: `set-autologon.ps1 -Disable`. |
+| `config\sunshine.conf` | `dd_configuration_option = ensure_only_display`, `headless_mode = enabled`, `dd_config_revert_on_disconnect = enabled` (see §8) |
 
 **TV**: apps `com.home.tvwake` ("PC Game") and `com.limelight.webos` (Moonlight), both installed
 through Developer Mode.
@@ -191,24 +214,45 @@ Done and verified:
 - Streaming Steam Big Picture through Apollo: works.
 
 Open:
-- [ ] **Real wake from shutdown/sleep through the app**: not yet tested end to end (WoL from
-      the L590 worked in an earlier setup). BIOS ErP status not checked.
-- [ ] **Windows auto-login**: Autologon did not work (Microsoft account). Without it, after a cold
-      boot you log in on the streamed login screen; Steam starts after that.
+- [ ] **Real wake from shutdown/sleep through the app**: not yet tested end to end. WoL from a full
+      shutdown via `scripts/pc-on.sh` works (2026-11-09: answers after 25 s, auto-login OK). BIOS ErP status not checked.
+- [x] **Windows auto-login** (fixed 2026-11-09). The first attempt failed because Autologon got the PIN
+      instead of the Microsoft account password (Security log: 4625, `0xC000006A`), and Windows then
+      reset `AutoAdminLogon`. Now set with `pc/set-autologon.ps1` (checks the password with `LogonUser`
+      first; user = account e-mail, domain = `MicrosoftAccount`). BitLocker is TPM-only, so no pre-boot PIN.
 - [x] **Image quality** (fixed 2026-11-08). The starting state was Moonlight at 1080p / 10 Mbit/s and Apollo capturing
       the 3440x1440 monitor, with Big Picture opening on the monitor. The working setup:
       - Moonlight: 3840x2160, 120 fps (60 is sharper at the same bitrate), **65 Mbit/s = the maximum
         Moonlight allows on webOS**, H.265 on, AV1 off (the RTX 3090 cannot encode AV1), HDR off.
       - Apollo → Applications → Steam Big Picture → **Always create Virtual Display** (`"virtual-display": true`).
       - Apollo → Audio/Video → Advanced display device options → **Device configuration =
-        "Activate the display and make it primary"** (`dd_configuration_option = ensure_primary`
-        in `sunshine.conf`). Without it, Steam opens on the monitor (the primary display) and the TV shows an empty desktop.
+        "Deactivate other displays and activate only the specified display"**
+        (`dd_configuration_option = ensure_only_display` in `sunshine.conf`; changed 2026-11-09 from
+        `ensure_primary`). With `ensure_primary` the monitor stayed on next to the virtual display
+        (`Virtual Desktop : 7280x2160` in the log), so games sometimes opened on the monitor or lost focus
+        and the TV did not show them full screen. Now the monitor is off during a stream and comes back
+        when the app is quit.
+      - Apollo → **Headless Mode = on** (`headless_mode = enabled`): every app starts in a virtual display.
+      - Apollo → **Config revert on disconnect = on** (`dd_config_revert_on_disconnect = enabled`, 2026-11-09).
+        Without it, turning the TV off mid-game only *pauses* the session and the monitor stays dark until
+        the app is quit. Now the monitor comes back as soon as the TV disconnects; the game keeps running and
+        the display setup is applied again on reconnect. (A TV-side fix cannot work: the remote's power
+        button kills the app.)
+      - Backup of the previous config: `config\sunshine.conf.bak-20261109`.
       - Verified in `sunshine.log`: `Capture size 3840x2160`, `Display refresh rate [120Hz]`; the virtual
         display is primary during the stream and the monitor stays on.
       - Start apps **from Moonlight**, not from Apollo's web UI. A web-UI launch creates the virtual display
         in the fallback mode (1920x1080x60), and the TV then *resumes* that session. If it happens:
         Quit the app in Moonlight and start it again.
-- [ ] Steam did not start from autostart once (Run entry exists). Check Task Manager → Startup apps.
+- [ ] **Steam does not start after auto-login** (cause found 2026-11-09): all HKCU Run entries are
+      disabled in `StartupApproved` (see §6). Enable Steam in Task Manager → Startup apps, or add a
+      logon task. Until then the agent's "ready" (Apollo port) comes before Steam.
+- [ ] **PC left on after the TV is switched off.** Idea: Windows sleep timer (now `STANDBYIDLE = 0`,
+      never) of 15–20 min, if Apollo keeps the PC awake during a stream (check `powercfg /requests`
+      while streaming); otherwise a small watcher that sleeps the PC 5 min after `CLIENT DISCONNECTED`
+      without a new session. Sleep rather than shutdown: WoL from S3 works and the session survives.
+- [ ] Agent readiness: Apollo's port opens at the login screen, before Steam. Optionally also wait for
+      Steam (port 27036) before launching Moonlight.
 - [ ] **Direct start into Big Picture**: needs the numeric app ID from Moonlight's app info
       dialog; then in `.env`:
       `STREAM_APP_PARAMS='{"host_uuid":"A4ED6DC5-4E97-DA21-C08C-416F2459E2BF","host_app_id":<ID>}'`

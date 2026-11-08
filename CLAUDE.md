@@ -6,8 +6,11 @@ Hobby project: press "PC Game" on an LG TV → the helper (ThinkPad L590, Ubuntu
 
 ## Machines and access
 
-- **Workstation = the gaming PC** (`MoralMe`, Windows 11). This repo lives here. **No Python here**;
-  use Git Bash for scripts, PowerShell for Windows checks. Node is available.
+- **Workstation = the gaming PC** (`MoralMe`, Windows 11) or the **MacBook**; the repo is checked out on both.
+  On the PC: **no Python**; use Git Bash for scripts, PowerShell for Windows checks. Node is available.
+- **From the MacBook**: `ssh moralme` (the PC, admin PowerShell: pipe scripts on stdin, see OPERATIONS §3),
+  `ssh l590`, `ssh lgtv` (TV directly) / `ssh lgtv-remote` (via the helper). The Mac checkout keeps the
+  config as untracked `env` (never commit it).
 - **Helper**: `ssh l590` (passwordless, user `akeya`, **sudo needs a password**, so you can't use it).
   Everything runs as systemd **user** units there; no root needed.
 - **TV**: reachable from the helper only: `ssh -tt -i ~/.ssh/tvwake_tv -p 9922 -o PubkeyAcceptedAlgorithms=+ssh-rsa -o HostKeyAlgorithms=+ssh-rsa prisoner@192.168.1.111`.
