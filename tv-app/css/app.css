@@ -1,0 +1,175 @@
+/*
+ * Sizes are in vh so the layout is identical at 1080p and 4K (webOS renders web apps at
+ * 1920x1080 CSS pixels and scales). 1vh = 10.8 px at 1080p.
+ */
+:root {
+  --bg: #0e1116;
+  --panel: #171b22;
+  --line: #262c36;
+  --text: #e8ecf1;
+  --muted: #8b95a5;
+  --accent: #4ea1ff;
+  --ok: #3ccf7a;
+  --bad: #ff5c5c;
+  --warn: #ffb547;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "LG Smart UI", "Museo Sans", "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 2.6vh;
+  overflow: hidden;
+  cursor: default;
+}
+
+/*
+ * Vertical budget at 100vh: header ~17, 6 stages x 6.6 = ~40, error ~14, buttons ~10,
+ * footer 7 -> fits with room to spare. Keep it that way when adding things.
+ */
+.screen {
+  position: absolute;
+  inset: 0 0 7vh 0;
+  padding: 4vh 10vw 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.head h1 {
+  margin: 0;
+  font-size: 5.2vh;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.banner {
+  margin: 0.8vh 0 2.5vh;
+  font-size: 3vh;
+  color: var(--muted);
+}
+.banner.good { color: var(--ok); }
+.banner.bad { color: var(--bad); }
+
+/* ---- stages ---- */
+
+.stages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 0.15vh solid var(--line);
+}
+
+.stage {
+  display: flex;
+  align-items: center;
+  gap: 2vh;
+  padding: 0.8vh 1vh;
+  border-bottom: 0.15vh solid var(--line);
+  height: 6.6vh;
+}
+
+.stage .icon {
+  flex: 0 0 4vh;
+  height: 4vh;
+  border-radius: 50%;
+  border: 0.35vh solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.4vh;
+  font-weight: 700;
+}
+
+.stage .text { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.stage .title { font-size: 2.8vh; line-height: 1.2; }
+.stage .msg {
+  font-size: 2.2vh;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stage .time {
+  flex: 0 0 auto;
+  font-size: 2.6vh;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.stage.pending .title, .stage.skipped .title { color: var(--muted); }
+.stage.skipped .icon::before { content: "–"; color: var(--muted); }
+
+.stage.running .icon {
+  border-color: var(--accent) transparent var(--accent) transparent;
+  animation: spin 1.2s linear infinite;
+}
+.stage.running .title { color: var(--text); font-weight: 600; }
+
+.stage.ok .icon { border-color: var(--ok); background: var(--ok); color: var(--bg); }
+.stage.ok .icon::before { content: "✓"; }
+
+.stage.failed .icon { border-color: var(--bad); background: var(--bad); color: var(--bg); }
+.stage.failed .icon::before { content: "!"; }
+.stage.failed .title { color: var(--bad); font-weight: 600; }
+/* the failed stage keeps a one-line summary; the full text is in the .error box below */
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- error + buttons ---- */
+
+.error {
+  margin-top: 2vh;
+  padding: 1.4vh 2.5vh;
+  background: var(--panel);
+  border-left: 0.6vh solid var(--bad);
+  border-radius: 0.8vh;
+  font-size: 2.4vh;
+  line-height: 1.35;
+  max-height: 14vh;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.error p { margin: 0; }
+
+.buttons { margin-top: 2.5vh; display: flex; gap: 2.5vh; flex: 0 0 auto; }
+
+.btn {
+  font: inherit;
+  font-size: 2.8vh;
+  min-width: 22vh;
+  padding: 1.3vh 4vh;
+  border-radius: 1vh;
+  border: 0.35vh solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  outline: none;
+}
+.btn.focused {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #06121f;
+  transform: scale(1.05);
+}
+
+/* ---- footer ---- */
+
+.footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 7vh;
+  padding: 0 10vw;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 2vh;
+  color: var(--muted);
+  border-top: 0.15vh solid var(--line);
+}
+.footer .warn { color: var(--warn); }

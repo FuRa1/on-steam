@@ -1,0 +1,4 @@
+# Scripts and config run on Linux/webOS: always LF, even on a Windows checkout.
+* text=auto eol=lf
+*.png binary
+*.ipk binary

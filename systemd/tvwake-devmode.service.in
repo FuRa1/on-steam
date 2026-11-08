@@ -1,0 +1,11 @@
+[Unit]
+Description=tv-wake-launcher: keep the LG Developer Mode session alive
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@/agent
+ExecStart=@PYTHON@ -m tvwake.devmode --env @ENV_FILE@ tick
+Environment=PYTHONUNBUFFERED=1
+TimeoutStartSec=180
+@USER_LINE@

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PC Game</title>
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    // Catch errors that happen before app.js has installed its own handlers (e.g. a broken config.js).
+    window.__twEarlyErrors = [];
+    window.onerror = function (msg) { window.__twEarlyErrors.push(String(msg)); };
+  </script>
+</head>
+<body>
+  <main class="screen">
+    <header class="head">
+      <h1 id="title">PC Game</h1>
+      <p id="banner" class="banner">Starting…</p>
+    </header>
+    <ol id="stages" class="stages" aria-live="polite"></ol>
+    <section id="error" class="error" hidden>
+      <p id="error-text"></p>
+    </section>
+    <div id="buttons" class="buttons"></div>
+  </main>
+  <footer class="footer">
+    <span id="f-helper"></span>
+    <span id="f-devmode"></span>
+    <span id="f-meta"></span>
+  </footer>
+
+  <script src="config.js"></script>
+  <!-- LG's webOSTV.js (optional: without it js/luna.js uses PalmServiceBridge directly) -->
+  <script src="js/lib/webOSTV.js"></script>
+  <script src="js/lib/sha256.js"></script>
+  <script src="js/hmac.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/luna.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

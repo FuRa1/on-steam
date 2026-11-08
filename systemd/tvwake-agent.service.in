@@ -1,0 +1,18 @@
+[Unit]
+Description=tv-wake-launcher agent (HTTP API for the TV app)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@/agent
+ExecStart=@PYTHON@ -m tvwake --env @ENV_FILE@
+Environment=PYTHONUNBUFFERED=1
+# Binding to HELPER_BIND fails until the network is up at boot; just retry.
+Restart=always
+RestartSec=5
+# Note: no NoNewPrivileges= here. It would strip the cap_net_raw file capability that lets
+# the system `ping` work without root.
+@USER_LINE@
+
+[Install]
+WantedBy=@WANTED_BY@

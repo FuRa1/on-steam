@@ -1,0 +1,11 @@
+[Unit]
+Description=tv-wake-launcher: Developer Mode check every @TICK_MIN@ minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=@TICK_MIN@min
+AccuracySec=30s
+Unit=tvwake-devmode.service
+
+[Install]
+WantedBy=timers.target

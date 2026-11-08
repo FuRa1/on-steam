@@ -1,0 +1,2 @@
+# Optional: switching the TV off (scripts/tv-off.sh). Same library Home Assistant uses for LG webOS TVs.
+aiowebostv>=0.4,<1
