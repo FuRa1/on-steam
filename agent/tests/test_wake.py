@@ -190,7 +190,7 @@ def test_notifies_only_when_the_pc_was_woken(make_cfg):
     assert sent == []  # already on: no message
     clock = FakeClock()
     _, sent = run_job_notify(make_cfg(QUIET_PERIOD_S=0), FakePC(clock, ping_at=6, stream_at=8), clock)
-    assert len(sent) == 1 and sent[0].startswith("💡") and "готов за" in sent[0]
+    assert len(sent) == 1 and sent[0].startswith("💡") and "ready in" in sent[0]
 
 
 def test_notifies_failures(make_cfg):

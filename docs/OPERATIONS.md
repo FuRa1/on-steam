@@ -236,7 +236,7 @@ Open:
       - Apollo → **Config revert on disconnect = on** (`dd_config_revert_on_disconnect = enabled`, 2026-11-09).
         **Does not help with a paused session** (tested): turning the TV off mid-game only *pauses* it,
         Apollo keeps the virtual display, and the monitor stays dark until the app is quit. That is why the
-        PC now puts itself to sleep on a pause with the TV off (§9); "PC Game" then resumes the same game.
+        PC now puts itself to sleep when a stream is over (§9); "PC Game" then resumes the same game.
         (A TV-side fix cannot work: the remote's power button kills the TV apps.)
       - Backup of the previous config: `config\sunshine.conf.bak-20261109`.
       - Verified in `sunshine.log`: `Capture size 3840x2160`, `Display refresh rate [120Hz]`; the virtual
@@ -260,7 +260,7 @@ Open:
       and `scripts/deploy.sh tv`.
 - [ ] Controller: none yet. Connect it to the **TV** (Bluetooth/USB); ViGEmBus on the PC is installed.
 
-## 9. PC events: Telegram + sleep when the TV is off (2026-11-09)
+## 9. PC events: Telegram + sleep when a stream is over (2026-11-09)
 
 Everything runs **on the PC**, driven by events; nothing polls. The helper is never put to sleep.
 
@@ -268,15 +268,18 @@ Everything runs **on the PC**, driven by events; nothing polls. The helper is ne
 |---|---|---|
 | app started / closed | Apollo `global_prep_cmd` do / undo | ▶️ started / ⏹ finished |
 | first client connected / all disconnected | Apollo `global_state_cmd` do / undo | ▶️ resumed / ⏸ paused |
-| paused + TV off | the pause hook (TV checked twice: ping, ports 3001/9922) | 😴, then S3 sleep |
+| stream over (pause or app closed), nothing restarts within 30 s | the pause / end hook | 😴, then S3 sleep (TV on or off) |
 | boot / wake / shutdown | Task Scheduler `\TvWake\` (startup; Power-Troubleshooter 1; User32 1074) | 💻 / ☀️ (with the time it fell asleep) / ⏻ |
 | PC woken from the TV | the agent on the helper (`agent/tvwake/notify.py`) | 💡 ready in N s / ❌ |
 
 - Install / update on the PC (elevated): `powershell -ExecutionPolicy Bypass -File pc\install-events.ps1`
-  (settings from `.env`: `TELEGRAM_*`, `TV_IP`, `AUTOSLEEP` off|dry-run|on, `AUTOSLEEP_AFTER_MIN`).
+  (settings from `.env`: `TELEGRAM_*`, `AUTOSLEEP` off|dry-run|on, `AUTOSLEEP_AFTER_MIN`).
   `-Uninstall` reverts everything. Log: `C:\ProgramData\tvwake\events.log`.
-- Sleep only happens in the pause hook, so a PC woken by hand is never put back to sleep (the earlier
-  polling version did exactly that: it trusted the wake time, see below).
+- Sleep only happens in the pause/end hook, so a PC woken by hand is never put back to sleep (the earlier
+  polling version did exactly that: it trusted the wake time, see below). "Is a stream back?" = the
+  number of `New streaming session` / `Session resuming` lines in Apollo's log changed during the 30 s
+  (a restarted Apollo starts a new log, which also counts as "don't sleep").
+- Known gap: a PC woken but never streamed to stays on (no stream, no hook).
 - Apollo waits for its hook commands, so the hook starts a detached copy through **WMI**
   (`Win32_Process.Create`). Processes started by a short-lived parent otherwise die with it: a sleep
   started with `Start-Process` from an ssh session never happened.

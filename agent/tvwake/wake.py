@@ -130,9 +130,9 @@ class WakeManager:
             return
         took = (job.finished_at or self.now()) - job.created_at
         if job.state == JOB_FAILED:
-            text = f"❌ Не удалось подготовить ПК ({took:.0f} с): {job.error}"
+            text = f"❌ Could not get the PC ready ({took:.0f} s): {job.error}"
         elif job.stage("wake").state == OK:
-            text = f"💡 ПК разбудили с ТВ, готов за {took:.0f} с"
+            text = f"💡 PC woken from the TV, ready in {took:.0f} s"
         else:
             return  # the PC was already on: nothing worth a message
         try:

@@ -56,7 +56,7 @@ scripts/             deploy.sh, install-agent.sh, build-tv.sh, install-tv.sh, se
 systemd/             agent service, devmode service + timer (templates)
 pc/                  setup-windows.ps1 (one-time Windows setup, run as admin),
                      set-autologon.ps1 (auto-login, also for Microsoft accounts)
-                     events.ps1 + install-events.ps1 (Telegram events, sleep when the TV is off)
+                     events.ps1 + install-events.ps1 (Telegram events, sleep after a stream)
 mac/                 make-tv-shortcuts.sh (TV On / TV Off in the macOS Shortcuts app)
 docs/OPERATIONS.md   runbook: commands, verified device facts, file locations, recovery
 .env.example         every setting, commented

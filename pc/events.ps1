@@ -1,4 +1,4 @@
-# PC events -> Telegram, and sleep when a stream is left paused with the TV off.
+# PC events -> Telegram, and sleep once a stream is over (paused or app closed).
 # Installed to C:\ProgramData\tvwake\ by pc/install-events.ps1; settings in events.json next to it.
 #
 # Called by:
@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 $Dir = 'C:\ProgramData\tvwake'
 $LogFile = "$Dir\events.log"
 $ApolloLog = 'C:\Program Files\Apollo\config\sunshine.log'
-$TvPorts = @(3001, 9922)  # LG control protocol, dev mode ssh: open whenever the TV is on
+$SettleSeconds = 30  # after a pause/end: time to reconnect or start another app before sleeping
 
 function Log([string]$msg) {
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [$Kind] $msg"
@@ -49,19 +49,10 @@ function Send([string]$text) {
     }
 }
 
-function Tv-On([string]$ip) {
-    if (-not $ip) { return $true }  # unknown TV = assume on = never sleep
-    if (Test-Connection -ComputerName $ip -Count 1 -Quiet -ErrorAction SilentlyContinue) { return $true }
-    foreach ($p in $TvPorts) {
-        $c = New-Object Net.Sockets.TcpClient
-        try { if ($c.ConnectAsync($ip, $p).Wait(1500)) { return $true } } catch {} finally { $c.Dispose() }
-    }
-    $false
-}
-
-function Last-Session-Line {
-    Select-String -Path $ApolloLog -Pattern 'New streaming session|Session resuming|Session pausing|CLIENT DISCONNECTED|[Tt]erminat' |
-        Select-Object -Last 1 -ExpandProperty Line
+function Stream-Starts {
+    # How often a stream has started or resumed in Apollo's current log. If it grows while we wait,
+    # someone connected again; if it shrinks, Apollo restarted (new log). Either way: don't sleep.
+    @(Select-String -Path $ApolloLog -Pattern 'New streaming session|Session resuming').Count
 }
 
 function Mark([string]$name) { Set-Content "$Dir\last-$name" (Get-Date).ToString('o') }
@@ -73,19 +64,15 @@ function Seconds-Since([string]$name) {
     try { ((Get-Date) - [datetime](Get-Content "$Dir\last-$name" -ErrorAction Stop)).TotalSeconds } catch { 1e9 }
 }
 
-function Sleep-If-Tv-Off {
+function Sleep-When-Idle([string]$why) {
     $s = Settings
     if ($s.autosleep -eq 'off') { return }
-    Start-Sleep -Seconds ([double]$s.autosleep_after_s + 5)  # let a quick reconnect happen first
-    # Every check must say "leave it" or "sleep"; anything unexpected leaves the PC on.
-    foreach ($i in 1..2) {
-        if (Tv-On $s.tv_ip) { Log 'TV is on: not sleeping'; return }
-        Start-Sleep -Seconds 5
-    }
-    $last = Last-Session-Line
-    if ($last -notmatch 'Session pausing') { Log "stream not paused any more ($last): not sleeping"; return }
-    if ($s.autosleep -ne 'on') { Send '🧪 Усыпил бы ПК: стрим на паузе, ТВ выключен (пробный режим)'; return }
-    Send '😴 Стрим на паузе, ТВ выключен — усыпляю ПК'
+    $before = Stream-Starts
+    Start-Sleep -Seconds ([double]$s.autosleep_after_s + $SettleSeconds)
+    $after = Stream-Starts
+    if ($after -ne $before) { Log "stream started again ($before -> $after): not sleeping"; return }
+    if ($s.autosleep -ne 'on') { Send "🧪 Would put the PC to sleep: $why (dry run)"; return }
+    Send "😴 $(Get-Date -Format 'HH:mm') ${why}: putting the PC to sleep"
     Log 'sleeping'
     & rundll32.exe powrprof.dll,SetSuspendState 0,1,0   # hibernation is off here, so this is S3
 }
@@ -114,19 +101,19 @@ $who = if ($Client) { " ($Client)" } else { '' }
 $t = Get-Date -Format 'HH:mm'
 try {
     switch ($Kind) {
-        'start'  { Send "▶️ $t Стрим начался$what$who" }
-        'resume' { if ((Seconds-Since 'start') -gt 20) { Send "▶️ $t Стрим продолжен$what$who" } }  # skip the resume that comes with a start
-        'pause'  { Send "⏸ $t Клиент отключился, сессия на паузе$what"; Sleep-If-Tv-Off }
-        'end'    { Send "⏹ $t Стрим завершён$what" }
-        'boot'   { Send "💻 $t ПК включился" }
+        'start'  { Send "▶️ $t Stream started$what$who" }
+        'resume' { if ((Seconds-Since 'start') -gt 20) { Send "▶️ $t Stream resumed$what$who" } }  # skip the resume that comes with a start
+        'pause'  { Send "⏸ $t Client disconnected, session paused$what"; Sleep-When-Idle 'Stream paused' }
+        'end'    { Send "⏹ $t Stream ended$what"; Sleep-When-Idle 'Stream ended' }
+        'boot'   { Send "💻 $t PC turned on" }
         'wake'   {
             # Kernel-Power 42 ("entering sleep") has the right time; 107 ("resumed") does not.
             $slept = Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-Power'; Id = 42 } -MaxEvents 1 -ErrorAction SilentlyContinue
-            $since = if ($slept) { " (спал с $($slept.TimeCreated.ToString('HH:mm')))" } else { '' }
-            Send "☀️ $t ПК проснулся$since"
+            $since = if ($slept) { " (asleep since $($slept.TimeCreated.ToString('HH:mm')))" } else { '' }
+            Send "☀️ $t PC woke up$since"
         }
-        'shutdown' { Send "⏻ $t ПК выключается или перезагружается" }
-        'test'     { $s = Settings; Send "✅ $t События ПК подключены (автосон: $($s.autosleep))" }
+        'shutdown' { Send "⏻ $t PC is shutting down or restarting" }
+        'test'     { $s = Settings; Send "✅ $t PC events connected (auto-sleep: $($s.autosleep))" }
         default  { Log "unknown event" }
     }
 } catch {

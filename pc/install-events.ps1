@@ -1,5 +1,5 @@
-# Install pc/events.ps1: Telegram messages for stream and power events, and self-sleep when a stream
-# is left paused with the TV off. Run elevated (an admin ssh session counts):
+# Install pc/events.ps1: Telegram messages for stream and power events, and self-sleep once a stream
+# is over (paused or app closed). Run elevated (an admin ssh session counts):
 #
 #   powershell -ExecutionPolicy Bypass -File pc\install-events.ps1            # settings from ..\.env
 #   powershell -ExecutionPolicy Bypass -File pc\install-events.ps1 -Uninstall
@@ -55,11 +55,9 @@ if ($mode -notin 'off', 'dry-run', 'on') { throw "AUTOSLEEP must be off, dry-run
 $settings = [ordered]@{
     telegram_bot_token = "$($envs.TELEGRAM_BOT_TOKEN)"
     telegram_chat_id   = "$($envs.TELEGRAM_CHAT_ID)"
-    tv_ip              = "$($envs.TV_IP)"
     autosleep          = $mode
     autosleep_after_s  = [double]("0$($envs.AUTOSLEEP_AFTER_MIN)") * 60
 }
-if (-not $settings.tv_ip -and $mode -ne 'off') { throw 'TV_IP is needed for AUTOSLEEP.' }
 
 # ---- files ----------------------------------------------------------------------------------------
 New-Item -ItemType Directory -Force $Dir | Out-Null
@@ -98,7 +96,7 @@ Register-ScheduledTask -TaskPath $TaskPath -TaskName 'Boot' -Action (Task-Action
 Register-ScheduledTask -TaskPath $TaskPath -TaskName 'Wake' -Action (Task-Action 'wake') -Trigger (Event-Trigger 'Microsoft-Windows-Power-Troubleshooter' 1) -Principal $principal -Settings $opts -Force | Out-Null
 Register-ScheduledTask -TaskPath $TaskPath -TaskName 'Shutdown' -Action (Task-Action 'shutdown') -Trigger (Event-Trigger 'User32' 1074) -Principal $principal -Settings $opts -Force | Out-Null
 
-Write-Host "Installed. AUTOSLEEP=$mode, telegram=$([bool]$settings.telegram_bot_token), TV=$($settings.tv_ip)"
+Write-Host "Installed. AUTOSLEEP=$mode, telegram=$([bool]$settings.telegram_bot_token)"
 Write-Host "Log: $Dir\events.log"
 # Same path as an Apollo hook (hook mode -> detached worker via WMI), so the test message proves all of it.
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Dir\events.ps1" test
