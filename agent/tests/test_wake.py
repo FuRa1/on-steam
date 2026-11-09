@@ -190,11 +190,20 @@ def test_notifies_only_when_the_pc_was_woken(make_cfg):
     assert sent == []  # already on: no message
     clock = FakeClock()
     _, sent = run_job_notify(make_cfg(QUIET_PERIOD_S=0), FakePC(clock, ping_at=6, stream_at=8), clock)
-    assert len(sent) == 1 and sent[0].startswith("💡") and "ready in" in sent[0]
+    # Virtual time: 3 WoL packets 0.5 s apart -> t=1.0; polls every 4 s at 1.0 and 5.0 (no ping until 6),
+    # 9.0 answers; the port is open since 8, so the job is ready at exactly 9 s.
+    assert sent == ["🟢 <code>✓ pc.ready</code> woken from the TV in 9 s"]
 
 
 def test_notifies_failures(make_cfg):
     clock = FakeClock()
     job, sent = run_job_notify(make_cfg(), FakePC(clock), clock)
     assert job.state == "failed"
-    assert len(sent) == 1 and sent[0].startswith("❌")
+    assert len(sent) == 1 and sent[0].startswith("🔴 <code>✕ pc.error</code> after ")
+
+
+def test_notify_line_escapes_details():
+    from tvwake.notify import line
+
+    assert line("✕", "pc.error", "port <47989> & co") == "🔴 <code>✕ pc.error</code> port &lt;47989&gt; &amp; co"
+    assert line("⏻", "pc.on") == "<code>⏻ pc.on</code>"  # no mark defined for this key in the agent

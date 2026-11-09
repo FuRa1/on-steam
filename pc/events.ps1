@@ -13,10 +13,11 @@ param(
     [Parameter(Position = 0)][string]$Kind,  # not $Event: that is an automatic variable
     [switch]$Run,
     [string]$App = '',
-    [string]$Client = ''
+    [string]$Client = '',
+    [string]$Dir = 'C:\ProgramData\tvwake'   # another folder (with its own events.json) for testing
 )
 $ErrorActionPreference = 'Stop'
-$Dir = 'C:\ProgramData\tvwake'
+$Dir = $Dir.TrimEnd('\')  # "C:\x\" would end in \" on the worker's command line, an escaped quote
 $LogFile = "$Dir\events.log"
 $ApolloLog = 'C:\Program Files\Apollo\config\sunshine.log'
 $SettleSeconds = 30  # after a pause/end: time to reconnect or start another app before sleeping
@@ -32,16 +33,37 @@ function Settings {
     $s
 }
 
-function Send([string]$text) {
+# Messages look like log lines: <code>ICON key</code> details (Telegram HTML).
+#   <mark> <code>ICON key</code> details, e.g.  (blue dot) [arrow stream.start] Steam Big Picture . LG TV
+#   marks: blue = stream running, white = stream stopped, violet = PC power, green = ok, red = error
+#   (the agent on the helper sends pc.ready / pc.error in the same style).
+# This file is ASCII only: Windows PowerShell reads a .ps1 without a BOM in the ANSI code page, where
+# the UTF-8 bytes of some symbols turn into quote characters and break the script. So every non-ASCII
+# character is built from its code point.
+function U([int[]]$cp) { -join ($cp | ForEach-Object { [char]::ConvertFromUtf32($_) }) }
+$Icon = @{
+    start = U 0x2197; resume = U 0x21BB; pause = U 0x2016; end = U 0x25A0          # arrow NE, cycle, double bar, square
+    sleep = U 0x2193; wake = U 0x2191; on = U 0x23FB; off = U 0x23CF, 0xFE0E      # down, up, power, eject (as text)
+    ok = U 0x2713                                                                  # check mark
+}
+$Dot = " $(U 0xB7) "  # " . " middle dot between details
+$Live = U 0x1F535; $Idle = U 0x26AA, 0xFE0F; $Power = U 0x1F7E3; $Good = U 0x1F7E2   # blue, white, violet, green
+$Mark = @{
+    'stream.start' = $Live; 'stream.resume' = $Live; 'stream.pause' = $Idle; 'stream.end' = $Idle
+    'pc.sleep' = $Power; 'pc.wake' = $Power; 'pc.on' = $Power; 'pc.off' = $Power; 'events.ok' = $Good
+}
+function Html([string]$x) { $x.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;') }
+function Send([string]$icon, [string]$key, [string]$detail) {
+    $text = "$($Mark[$key]) <code>$icon $key</code> $(Html $detail)".Trim()
     $s = Settings
-    if (-not $s.telegram_bot_token -or -not $s.telegram_chat_id) { Log "no telegram settings: $text"; return }
+    if (-not $s.telegram_bot_token -or -not $s.telegram_chat_id) { Log "no telegram settings: $key $detail"; return }
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $body = @{ chat_id = $s.telegram_chat_id; text = $text; disable_web_page_preview = $true } | ConvertTo-Json -Compress
+    $body = @{ chat_id = $s.telegram_chat_id; text = $text; parse_mode = 'HTML'; disable_web_page_preview = $true } | ConvertTo-Json -Compress
     for ($i = 1; $i -le 3; $i++) {
         try {
             Invoke-RestMethod -Method Post -Uri "https://api.telegram.org/bot$($s.telegram_bot_token)/sendMessage" `
                 -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 10 | Out-Null
-            Log "sent: $text"; return
+            Log "sent: $key $detail"; return
         } catch {
             Log "send attempt $i failed: $($_.Exception.Message)"   # the message never contains the URL
             Start-Sleep -Seconds (5 * $i)                            # e.g. network not up yet after wake
@@ -63,6 +85,12 @@ function Dec([string]$x) { if (-not $x) { return '' }; [Text.Encoding]::UTF8.Get
 function Seconds-Since([string]$name) {
     try { ((Get-Date) - [datetime](Get-Content "$Dir\last-$name" -ErrorAction Stop)).TotalSeconds } catch { 1e9 }
 }
+function Duration([double]$sec) {
+    if ($sec -ge 1e8) { return '' }
+    $m = [int][math]::Round($sec / 60)
+    if ($m -lt 60) { return "$m min" }
+    "$([math]::Floor($m / 60)) h $($m % 60) min"
+}
 
 function Sleep-When-Idle([string]$why) {
     $s = Settings
@@ -71,8 +99,8 @@ function Sleep-When-Idle([string]$why) {
     Start-Sleep -Seconds ([double]$s.autosleep_after_s + $SettleSeconds)
     $after = Stream-Starts
     if ($after -ne $before) { Log "stream started again ($before -> $after): not sleeping"; return }
-    if ($s.autosleep -ne 'on') { Send "🧪 Would put the PC to sleep: $why (dry run)"; return }
-    Send "😴 $(Get-Date -Format 'HH:mm') ${why}: putting the PC to sleep"
+    if ($s.autosleep -ne 'on') { Send $Icon.sleep 'pc.sleep' "dry run, would sleep: $why"; return }
+    Send $Icon.sleep 'pc.sleep' $why
     Log 'sleeping'
     & rundll32.exe powrprof.dll,SetSuspendState 0,1,0   # hibernation is off here, so this is S3
 }
@@ -84,7 +112,7 @@ if (-not $Run) {
         if ($Kind -eq 'start') { Mark 'start' }  # here, not in the worker: the resume hook follows at once
         $a = if ($env:APOLLO_APP_NAME) { $env:APOLLO_APP_NAME } else { $env:SUNSHINE_APP_NAME }
         $c = if ($env:APOLLO_CLIENT_NAME) { $env:APOLLO_CLIENT_NAME } else { $env:SUNSHINE_CLIENT_NAME }
-        $cmd = "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Dir\events.ps1`" $Kind -Run -App $(Enc $a) -Client $(Enc $c)"
+        $cmd = "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Dir\events.ps1`" $Kind -Run -App $(Enc $a) -Client $(Enc $c) -Dir `"$Dir`""
         $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd }
         if ($r.ReturnValue -ne 0) { Log "could not start worker ($($r.ReturnValue))" }
     } catch {
@@ -96,24 +124,21 @@ if (-not $Run) {
 # ---- worker mode ----------------------------------------------------------------------------------
 $App = Dec $App
 $Client = Dec $Client
-$what = if ($App) { ": $App" } else { '' }
-$who = if ($Client) { " ($Client)" } else { '' }
-$t = Get-Date -Format 'HH:mm'
+$on = (@($App, $Client) | Where-Object { $_ }) -join $Dot   # "Steam Big Picture . LG TV"
 try {
     switch ($Kind) {
-        'start'  { Send "▶️ $t Stream started$what$who" }
-        'resume' { if ((Seconds-Since 'start') -gt 20) { Send "▶️ $t Stream resumed$what$who" } }  # skip the resume that comes with a start
-        'pause'  { Send "⏸ $t Client disconnected, session paused$what"; Sleep-When-Idle 'Stream paused' }
-        'end'    { Send "⏹ $t Stream ended$what"; Sleep-When-Idle 'Stream ended' }
-        'boot'   { Send "💻 $t PC turned on" }
+        'start'  { Send $Icon.start 'stream.start' $on }
+        'resume' { if ((Seconds-Since 'start') -gt 20) { Send $Icon.resume 'stream.resume' $on } }  # skip the resume that comes with a start
+        'pause'  { Send $Icon.pause 'stream.pause' ((@('client disconnected', $App) | Where-Object { $_ }) -join $Dot); Sleep-When-Idle 'stream paused' }
+        'end'    { Send $Icon.end 'stream.end' ((@($App, (Duration (Seconds-Since 'start'))) | Where-Object { $_ }) -join $Dot); Sleep-When-Idle 'stream ended' }
+        'boot'   { Send $Icon.on 'pc.on' 'cold boot' }
         'wake'   {
             # Kernel-Power 42 ("entering sleep") has the right time; 107 ("resumed") does not.
             $slept = Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-Power'; Id = 42 } -MaxEvents 1 -ErrorAction SilentlyContinue
-            $since = if ($slept) { " (asleep since $($slept.TimeCreated.ToString('HH:mm')))" } else { '' }
-            Send "☀️ $t PC woke up$since"
+            Send $Icon.wake 'pc.wake' $(if ($slept) { "asleep since $($slept.TimeCreated.ToString('HH:mm'))" } else { '' })
         }
-        'shutdown' { Send "⏻ $t PC is shutting down or restarting" }
-        'test'     { $s = Settings; Send "✅ $t PC events connected (auto-sleep: $($s.autosleep))" }
+        'shutdown' { Send $Icon.off 'pc.off' 'shutdown or restart' }
+        'test'     { $s = Settings; Send $Icon.ok 'events.ok' "auto-sleep: $($s.autosleep)" }
         default  { Log "unknown event" }
     }
 } catch {

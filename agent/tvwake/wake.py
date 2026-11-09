@@ -23,6 +23,7 @@ from typing import Callable
 
 from .clock import Clock
 from .config import Config
+from .notify import line
 from .probes import Probes
 
 log = logging.getLogger(__name__)
@@ -130,9 +131,9 @@ class WakeManager:
             return
         took = (job.finished_at or self.now()) - job.created_at
         if job.state == JOB_FAILED:
-            text = f"❌ Could not get the PC ready ({took:.0f} s): {job.error}"
+            text = line("✕", "pc.error", f"after {took:.0f} s: {job.error}")
         elif job.stage("wake").state == OK:
-            text = f"💡 PC woken from the TV, ready in {took:.0f} s"
+            text = line("✓", "pc.ready", f"woken from the TV in {took:.0f} s")
         else:
             return  # the PC was already on: nothing worth a message
         try:
