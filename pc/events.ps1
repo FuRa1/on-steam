@@ -36,7 +36,7 @@ function Settings {
 }
 
 # Messages look like log lines: <code>ICON key</code> details (Telegram HTML).
-#   <mark> <code>ICON key</code> details, e.g.  (blue dot) [arrow stream.start] Steam Big Picture . LG TV
+#   <mark> <code>ICON key</code> details, e.g.  (blue dot) [arrow stream.start] Steam . LG TV
 #   marks: blue = stream running, white = stream stopped, violet = PC power, green = ok, red = error
 #   (the agent on the helper sends pc.ready / pc.error in the same style).
 # This file is ASCII only: Windows PowerShell reads a .ps1 without a BOM in the ANSI code page, where
@@ -60,6 +60,7 @@ function Send([string]$icon, [string]$key, [string]$detail) {
     $s = Settings
     if (-not $s.telegram_bot_token -or -not $s.telegram_chat_id) { Log "no telegram settings: $key $detail"; return }
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    [Net.WebRequest]::DefaultWebProxy = $null  # skip proxy auto-detection (WPAD): seconds per new process
     $body = @{ chat_id = $s.telegram_chat_id; text = $text; parse_mode = 'HTML'; disable_web_page_preview = $true } | ConvertTo-Json -Compress
     for ($i = 1; $i -le 3; $i++) {
         try {
@@ -90,6 +91,7 @@ function Seconds-Since([string]$name) {
 function Duration([double]$sec) {
     if ($sec -ge 1e8) { return '' }
     $m = [int][math]::Round($sec / 60)
+    if ($m -lt 1) { return '' }       # no "0 min"
     if ($m -lt 60) { return "$m min" }
     "$([math]::Floor($m / 60)) h $($m % 60) min"
 }
@@ -117,7 +119,9 @@ function Watch-Games {
 [DllImport("advapi32.dll")] public static extern int RegNotifyChangeKeyValue(System.IntPtr key, bool subtree, int filter, System.IntPtr evt, bool async);
 '@
         $ended = End-Event
-        [void]$ended.Reset()  # an end from an earlier stream does not count
+        [void]$ended.Reset()  # an end from an earlier stream does not count...
+        # ...but this stream may already be over (e.g. the start message took a while to send).
+        if ((Seconds-Since 'end') -lt (Seconds-Since 'start')) { Log 'stream already ended: no game watcher'; return }
         $last = [int]$steam.GetValue('RunningAppID', 0)  # whatever runs now (or a stale value) is not news
         $changed = New-Object Threading.AutoResetEvent $false
         Log "game watcher on (RunningAppID=$last)"
@@ -146,8 +150,8 @@ function Sleep-When-Idle([string]$why) {
     Start-Sleep -Seconds ([double]$s.autosleep_after_s + $SettleSeconds)
     $after = Stream-Starts
     if ($after -ne $before) { Log "stream started again ($before -> $after): not sleeping"; return }
-    if ($s.autosleep -ne 'on') { Send $Icon.sleep 'pc.sleep' "dry run, would sleep: $why"; return }
-    Send $Icon.sleep 'pc.sleep' $why
+    if ($s.autosleep -ne 'on') { Send $Icon.sleep 'pc.sleep' "$why$($Dot)test mode, staying on"; return }
+    Send $Icon.sleep 'pc.sleep' "$why, going to sleep"
     Log 'sleeping'
     & rundll32.exe powrprof.dll,SetSuspendState 0,1,0   # hibernation is off here, so this is S3
 }
@@ -170,9 +174,9 @@ if (-not $Run) {
 }
 
 # ---- worker mode ----------------------------------------------------------------------------------
-$App = Dec $App
+$App = (Dec $App) -replace '\s*Big Picture\s*$', ''   # "Steam Big Picture" -> "Steam"
 $Client = Dec $Client
-$on = (@($App, $Client) | Where-Object { $_ }) -join $Dot   # "Steam Big Picture . LG TV"
+$on = (@($App, $Client) | Where-Object { $_ }) -join $Dot   # "Steam . LG TV"
 try {
     switch ($Kind) {
         'start'  { Send $Icon.start 'stream.start' $on; Watch-Games }
