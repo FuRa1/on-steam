@@ -5,6 +5,8 @@
 #   Apollo global_prep_cmd   do: start     undo: end       (app launched / app closed)
 #   Apollo global_state_cmd  do: resume    undo: pause     (first client connected / all disconnected)
 #   Task Scheduler           boot, wake, shutdown          (Windows events)
+# While a stream runs, the start/resume worker also watches Steam's RunningAppID (registry change
+# notifications, no polling) and reports each game that starts (game.start; no game.end on purpose).
 #
 # Apollo waits for its commands, so the hook only reads Apollo's variables and hands the work to a
 # detached copy of itself (-Run). That copy is created through WMI: processes started any other way
@@ -44,12 +46,12 @@ function U([int[]]$cp) { -join ($cp | ForEach-Object { [char]::ConvertFromUtf32(
 $Icon = @{
     start = U 0x2197; resume = U 0x21BB; pause = U 0x2016; end = U 0x25A0          # arrow NE, cycle, double bar, square
     sleep = U 0x2193; wake = U 0x2191; on = U 0x23FB; off = U 0x23CF, 0xFE0E      # down, up, power, eject (as text)
-    ok = U 0x2713                                                                  # check mark
+    ok = U 0x2713; game = U 0x25B8                                                 # check mark, small triangle
 }
 $Dot = " $(U 0xB7) "  # " . " middle dot between details
 $Live = U 0x1F535; $Idle = U 0x26AA, 0xFE0F; $Power = U 0x1F7E3; $Good = U 0x1F7E2   # blue, white, violet, green
 $Mark = @{
-    'stream.start' = $Live; 'stream.resume' = $Live; 'stream.pause' = $Idle; 'stream.end' = $Idle
+    'stream.start' = $Live; 'stream.resume' = $Live; 'stream.pause' = $Idle; 'stream.end' = $Idle; 'game.start' = $Live
     'pc.sleep' = $Power; 'pc.wake' = $Power; 'pc.on' = $Power; 'pc.off' = $Power; 'events.ok' = $Good
 }
 function Html([string]$x) { $x.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;') }
@@ -92,6 +94,48 @@ function Duration([double]$sec) {
     "$([math]::Floor($m / 60)) h $($m % 60) min"
 }
 
+function Steam-Game([int]$id) {
+    $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Software\Valve\Steam\Apps\$id")
+    $name = if ($k) { $k.GetValue('Name') } else { $null }
+    if ($name) { $name } else { "Steam app $id" }
+}
+
+function Watch-Games {
+    # One watcher at a time (start and resume both call this). Wait up to 70 s: a watcher from a stream
+    # that just ended notices the end within 60 s and lets go; one of the same stream never does.
+    $mutex = New-Object Threading.Mutex($false, 'Global\TvWakeGameWatcher')
+    try { if (-not $mutex.WaitOne(70000)) { Log 'game watcher already running'; return } }
+    catch [Threading.AbandonedMutexException] { }  # the previous watcher died: we own it now
+    try {
+        $steam = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Valve\Steam')
+        if (-not $steam) { Log 'no Steam registry key: game watcher off'; return }
+        Add-Type -Namespace TvWake -Name Reg -MemberDefinition @'
+[DllImport("advapi32.dll")] public static extern int RegNotifyChangeKeyValue(System.IntPtr key, bool subtree, int filter, System.IntPtr evt, bool async);
+'@
+        $began = Get-Date
+        $last = [int]$steam.GetValue('RunningAppID', 0)  # whatever runs now (or a stale value) is not news
+        $evt = New-Object Threading.AutoResetEvent $false
+        Log "game watcher on (RunningAppID=$last)"
+        while ($true) {
+            # REG_NOTIFY_CHANGE_LAST_SET (4): fires when a value of the Steam key is written. Re-armed each time.
+            $rc = [TvWake.Reg]::RegNotifyChangeKeyValue($steam.Handle.DangerousGetHandle(), $false, 4, $evt.SafeWaitHandle.DangerousGetHandle(), $true)
+            if ($rc -ne 0) { Log "RegNotifyChangeKeyValue failed ($rc): game watcher off"; return }
+            [void]$evt.WaitOne(60000)  # a change, or once a minute to see whether the stream is over
+            $alive = ((Get-Date) - $began).TotalSeconds
+            if ((Seconds-Since 'end') -lt $alive) { Log 'stream ended: game watcher off'; return }
+            if ($alive -gt 48 * 3600) { Log 'game watcher: 48 h, stopping'; return }
+            $id = [int]$steam.GetValue('RunningAppID', 0)
+            if ($id -ne $last) {
+                if ($id -ne 0) { Send $Icon.game 'game.start' (Steam-Game $id) }
+                $last = $id
+            }
+        }
+    } finally {
+        try { $mutex.ReleaseMutex() } catch {}
+        $mutex.Dispose()
+    }
+}
+
 function Sleep-When-Idle([string]$why) {
     $s = Settings
     if ($s.autosleep -eq 'off') { return }
@@ -110,6 +154,7 @@ function Sleep-When-Idle([string]$why) {
 if (-not $Run) {
     try {
         if ($Kind -eq 'start') { Mark 'start' }  # here, not in the worker: the resume hook follows at once
+        if ($Kind -eq 'end') { Mark 'end' }      # tells the game watcher to stop
         $a = if ($env:APOLLO_APP_NAME) { $env:APOLLO_APP_NAME } else { $env:SUNSHINE_APP_NAME }
         $c = if ($env:APOLLO_CLIENT_NAME) { $env:APOLLO_CLIENT_NAME } else { $env:SUNSHINE_CLIENT_NAME }
         $cmd = "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Dir\events.ps1`" $Kind -Run -App $(Enc $a) -Client $(Enc $c) -Dir `"$Dir`""
@@ -127,8 +172,8 @@ $Client = Dec $Client
 $on = (@($App, $Client) | Where-Object { $_ }) -join $Dot   # "Steam Big Picture . LG TV"
 try {
     switch ($Kind) {
-        'start'  { Send $Icon.start 'stream.start' $on }
-        'resume' { if ((Seconds-Since 'start') -gt 20) { Send $Icon.resume 'stream.resume' $on } }  # skip the resume that comes with a start
+        'start'  { Send $Icon.start 'stream.start' $on; Watch-Games }
+        'resume' { if ((Seconds-Since 'start') -gt 20) { Send $Icon.resume 'stream.resume' $on }; Watch-Games }  # skip the resume that comes with a start
         'pause'  { Send $Icon.pause 'stream.pause' ((@('client disconnected', $App) | Where-Object { $_ }) -join $Dot); Sleep-When-Idle 'stream paused' }
         'end'    { Send $Icon.end 'stream.end' ((@($App, (Duration (Seconds-Since 'start'))) | Where-Object { $_ }) -join $Dot); Sleep-When-Idle 'stream ended' }
         'boot'   { Send $Icon.on 'pc.on' 'cold boot' }

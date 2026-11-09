@@ -266,11 +266,17 @@ Everything runs **on the PC**, driven by events; nothing polls. The helper is ne
 
 | Event | Fired by | Telegram |
 |---|---|---|
-| app started / closed | Apollo `global_prep_cmd` do / undo | ▶️ started / ⏹ finished |
-| first client connected / all disconnected | Apollo `global_state_cmd` do / undo | ▶️ resumed / ⏸ paused |
-| stream over (pause or app closed), nothing restarts within 30 s | the pause / end hook | 😴, then S3 sleep (TV on or off) |
-| boot / wake / shutdown | Task Scheduler `\TvWake\` (startup; Power-Troubleshooter 1; User32 1074) | 💻 / ☀️ (with the time it fell asleep) / ⏻ |
-| PC woken from the TV | the agent on the helper (`agent/tvwake/notify.py`) | 💡 ready in N s / ❌ |
+| app started / closed | Apollo `global_prep_cmd` do / undo | `stream.start` / `stream.end` (+ session length) |
+| first client connected / all disconnected | Apollo `global_state_cmd` do / undo | `stream.resume` / `stream.pause` |
+| a Steam game starts during a stream | watcher in the start/resume worker: `RegNotifyChangeKeyValue` on `HKCU\Software\Valve\Steam` (`RunningAppID`), stops on `stream.end` | `game.start <name>` (no game.end, on purpose) |
+| stream over (pause or app closed), nothing restarts within 30 s | the pause / end hook | `pc.sleep`, then S3 sleep (TV on or off) |
+| boot / wake / shutdown | Task Scheduler `\TvWake\` (startup; Power-Troubleshooter 1; User32 1074) | `pc.on` / `pc.wake` (asleep since HH:MM) / `pc.off` |
+| PC woken from the TV | the agent on the helper (`agent/tvwake/notify.py`) | `pc.ready` (in N s) / `pc.error` |
+
+Message style ("Terminal + color"): `MARK <code>ICON key</code> details`, Telegram HTML. Marks: 🔵 stream
+running, ⚪ stopped, 🟣 PC power, 🟢 ok, 🔴 error. Telegram shows `<code>` as monospace only (no color);
+the marks carry the color. `events.ps1` is pure ASCII (symbols built from code points), so it works
+with or without a BOM.
 
 - Install / update on the PC (elevated): `powershell -ExecutionPolicy Bypass -File pc\install-events.ps1`
   (settings from `.env`: `TELEGRAM_*`, `AUTOSLEEP` off|dry-run|on, `AUTOSLEEP_AFTER_MIN`).
@@ -285,8 +291,13 @@ Everything runs **on the PC**, driven by events; nothing polls. The helper is ne
   started with `Start-Process` from an ssh session never happened.
 - **Kernel-Power 107 ("resumed from sleep") is stamped with the time the PC went to sleep**, not the
   wake time. The real wake time is Power-Troubleshooter 1.
-- `events.ps1` is installed with a UTF-8 BOM: Windows PowerShell reads a .ps1 without one in the ANSI
-  code page, which breaks the Cyrillic/emoji messages.
+- Windows PowerShell reads a .ps1 without a BOM in the ANSI code page; the UTF-8 bytes of some symbols
+  (e.g. ✓ → `“`) then act as quote characters and break the script. Hence pure ASCII in `events.ps1`.
+- Test without Apollo: copy `events.ps1` and an `events.json` (autosleep `dry-run`) to a folder and run
+  `events.ps1 <start|end|pause|test> -Dir <folder>` with `APOLLO_APP_NAME` set; `-Run` runs a worker
+  directly. Steam games can be simulated by writing `RunningAppID` (restore it afterwards).
+- Steam can leave a stale `RunningAppID` / `Running=1` after it was closed; the watcher only reports
+  changes after it started.
 - The Telegram bot is the one Uptime Kuma uses (helper, http://akeya-thinkpad-l590:3001 → Settings →
   Notifications). The token is in `.env` on the MacBook (`env`), the helper and the PC; never commit it.
 - `QUIET_PERIOD_S=0`: the agent starts checking right after WoL (a sleeping PC answers in seconds).
