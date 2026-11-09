@@ -32,6 +32,7 @@ function Log([string]$msg) {
 function Settings {
     $s = Get-Content "$Dir\events.json" -Raw -Encoding UTF8 | ConvertFrom-Json
     if (-not $s.autosleep) { $s | Add-Member autosleep 'off' }
+    if ($null -eq $s.autosleep_game_s) { $s | Add-Member autosleep_game_s 900 }  # older events.json
     $s
 }
 
@@ -51,7 +52,7 @@ $Icon = @{
 $Dot = " $(U 0xB7) "  # " . " middle dot between details
 $Live = U 0x1F535; $Idle = U 0x26AA, 0xFE0F; $Power = U 0x1F7E3; $Good = U 0x1F7E2   # blue, white, violet, green
 $Mark = @{
-    'stream.start' = $Live; 'stream.resume' = $Live; 'stream.pause' = $Idle; 'stream.end' = $Idle; 'game.start' = $Live
+    'stream.start' = $Live; 'stream.resume' = $Live; 'stream.pause' = $Idle; 'stream.end' = $Idle; 'game.start' = $Live; 'game.end' = $Idle
     'pc.sleep' = $Power; 'pc.wake' = $Power; 'pc.on' = $Power; 'pc.off' = $Power; 'events.ok' = $Good
 }
 function Html([string]$x) { $x.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;') }
@@ -143,14 +144,51 @@ function Watch-Games {
     }
 }
 
+function Running-Game {
+    # Steam's RunningAppID, or 0. Steam can leave a stale value after it quit, so only while it runs.
+    if (-not (Get-Process steam -ErrorAction SilentlyContinue)) { return 0 }
+    $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Valve\Steam')
+    if ($k) { [int]$k.GetValue('RunningAppID', 0) } else { 0 }
+}
+
+function Close-Game {
+    # Every process started from a Steam library's game folder (works for any library drive).
+    $procs = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -match '\\steamapps\\common\\' })
+    foreach ($p in $procs) {
+        Log "closing $($p.Name) ($($p.ProcessId)): $($p.ExecutablePath)"
+        Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    $procs.Count
+}
+
 function Sleep-When-Idle([string]$why) {
+    # Many games do not survive S3 (the GPU is powered off; they hang or show black after waking).
+    # So: no game -> sleep after 30 s. A game left running -> give it AUTOSLEEP_GAME_MIN for a break,
+    # then close it and sleep, so the next stream starts clean instead of on a frozen game.
     $s = Settings
     if ($s.autosleep -eq 'off') { return }
+    $wait = [double]$s.autosleep_after_s + $SettleSeconds
+    $game = Running-Game
+    if ($game) {
+        $wait = [math]::Max($wait, [double]$s.autosleep_game_s)
+        Log "game $game is running: waiting $wait s before closing it and sleeping"
+    }
     $before = Stream-Starts
-    Start-Sleep -Seconds ([double]$s.autosleep_after_s + $SettleSeconds)
+    Start-Sleep -Seconds $wait
     $after = Stream-Starts
     if ($after -ne $before) { Log "stream started again ($before -> $after): not sleeping"; return }
-    if ($s.autosleep -ne 'on') { Send $Icon.sleep 'pc.sleep' "$why$($Dot)test mode, staying on"; return }
+    $game = Running-Game
+    $test = $s.autosleep -ne 'on'
+    if ($game) {
+        $name = Steam-Game $game
+        if ($test) { Send $Icon.end 'game.end' "$name$($Dot)test mode, would close it" }
+        else {
+            $n = Close-Game
+            Send $Icon.end 'game.end' "$name$($Dot)closed before sleep ($n process$(if ($n -ne 1) { 'es' }))"
+            Start-Sleep -Seconds 3
+        }
+    }
+    if ($test) { Send $Icon.sleep 'pc.sleep' "$why$($Dot)test mode, staying on"; return }
     Send $Icon.sleep 'pc.sleep' "$why, going to sleep"
     Log 'sleeping'
     & rundll32.exe powrprof.dll,SetSuspendState 0,1,0   # hibernation is off here, so this is S3

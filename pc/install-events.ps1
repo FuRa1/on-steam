@@ -57,6 +57,7 @@ $settings = [ordered]@{
     telegram_chat_id   = "$($envs.TELEGRAM_CHAT_ID)"
     autosleep          = $mode
     autosleep_after_s  = [double]("0$($envs.AUTOSLEEP_AFTER_MIN)") * 60
+    autosleep_game_s   = $(if ($envs.AUTOSLEEP_GAME_MIN) { [double]$envs.AUTOSLEEP_GAME_MIN * 60 } else { 900 })
 }
 
 # ---- files ----------------------------------------------------------------------------------------

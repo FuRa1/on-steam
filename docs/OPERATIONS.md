@@ -270,6 +270,7 @@ Everything runs **on the PC**, driven by events; nothing polls. The helper is ne
 | first client connected / all disconnected | Apollo `global_state_cmd` do / undo | `stream.resume` / `stream.pause` |
 | a Steam game starts during a stream | watcher in the start/resume worker: sleeps on `RegNotifyChangeKeyValue` (`HKCU\Software\Valve\Steam`, `RunningAppID`) and on the named event `Global\TvWakeStreamEnded` that the end hook sets; no timer | `game.start <name>` (no game.end, on purpose) |
 | stream over (pause or app closed), nothing restarts within 30 s | the pause / end hook | `pc.sleep`, then S3 sleep (TV on or off) |
+| same, but a Steam game is still running | waits `AUTOSLEEP_GAME_MIN` (15) instead of 30 s, then closes every `steamapps\common` process | `game.end <name> · closed before sleep`, then `pc.sleep` |
 | boot / wake / shutdown | Task Scheduler `\TvWake\` (startup; Power-Troubleshooter 1; User32 1074) | `pc.on` / `pc.wake` (asleep since HH:MM) / `pc.off` |
 | PC woken from the TV | the agent on the helper (`agent/tvwake/notify.py`) | `pc.ready` (in N s) / `pc.error` |
 
@@ -279,13 +280,18 @@ the marks carry the color. `events.ps1` is pure ASCII (symbols built from code p
 with or without a BOM.
 
 - Install / update on the PC (elevated): `powershell -ExecutionPolicy Bypass -File pc\install-events.ps1`
-  (settings from `.env`: `TELEGRAM_*`, `AUTOSLEEP` off|dry-run|on, `AUTOSLEEP_AFTER_MIN`).
+  (settings from `.env`: `TELEGRAM_*`, `AUTOSLEEP` off|dry-run|on, `AUTOSLEEP_AFTER_MIN`, `AUTOSLEEP_GAME_MIN`).
   `-Uninstall` reverts everything. Log: `C:\ProgramData\tvwake\events.log`.
 - Sleep only happens in the pause/end hook, so a PC woken by hand is never put back to sleep (the earlier
   polling version did exactly that: it trusted the wake time, see below). "Is a stream back?" = the
   number of `New streaming session` / `Session resuming` lines in Apollo's log changed during the 30 s
   (a restarted Apollo starts a new log, which also counts as "don't sleep").
 - Known gap: a PC woken but never streamed to stays on (no stream, no hook).
+- **Games and S3** (seen 2026-11-09 with INSIDE): after waking, a game left running can hang (0 % CPU,
+  black picture on the TV and the monitor) because the GPU was powered off and the game does not
+  rebuild its device; exclusive fullscreen on Apollo's virtual display makes it worse. Big Picture
+  itself survives. Hence the game timeout above. Borderless/windowed fullscreen in a game's settings
+  makes it more likely to survive a short sleep.
 - Apollo waits for its hook commands, so the hook starts a detached copy through **WMI**
   (`Win32_Process.Create`). Processes started by a short-lived parent otherwise die with it: a sleep
   started with `Start-Process` from an ssh session never happened.
