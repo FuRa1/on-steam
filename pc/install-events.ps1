@@ -108,7 +108,8 @@ if ($apolloName) {
 }
 
 # The countdown window must run in the signed-in user's desktop session: a task as that user, at logon.
-$me = "$env:USERDOMAIN\$env:USERNAME"
+# From the token, not $env:USERDOMAIN: over ssh that is "WORKGROUP", which is no account.
+$me = [Security.Principal.WindowsIdentity]::GetCurrent().Name   # e.g. MoralMe\grevt
 # Elevated (no UAC prompt for an admin account in a task): Esc x3 may restart the Apollo service.
 $userPrincipal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Highest
 $watchOpts = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
