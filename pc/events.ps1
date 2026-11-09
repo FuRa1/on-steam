@@ -94,6 +94,10 @@ function Duration([double]$sec) {
     "$([math]::Floor($m / 60)) h $($m % 60) min"
 }
 
+# Signalled by the end hook; the game watcher waits on it together with the registry notification.
+$EndEventName = 'Global\TvWakeStreamEnded'
+function End-Event { New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $EndEventName) }
+
 function Steam-Game([int]$id) {
     $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Software\Valve\Steam\Apps\$id")
     $name = if ($k) { $k.GetValue('Name') } else { $null }
@@ -101,10 +105,10 @@ function Steam-Game([int]$id) {
 }
 
 function Watch-Games {
-    # One watcher at a time (start and resume both call this). Wait up to 70 s: a watcher from a stream
-    # that just ended notices the end within 60 s and lets go; one of the same stream never does.
+    # One watcher at a time (start and resume both call this). A watcher of a stream that just ended
+    # lets go at once (end event); wait a little in case it is still finishing.
     $mutex = New-Object Threading.Mutex($false, 'Global\TvWakeGameWatcher')
-    try { if (-not $mutex.WaitOne(70000)) { Log 'game watcher already running'; return } }
+    try { if (-not $mutex.WaitOne(15000)) { Log 'game watcher already running'; return } }
     catch [Threading.AbandonedMutexException] { }  # the previous watcher died: we own it now
     try {
         $steam = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Valve\Steam')
@@ -112,18 +116,17 @@ function Watch-Games {
         Add-Type -Namespace TvWake -Name Reg -MemberDefinition @'
 [DllImport("advapi32.dll")] public static extern int RegNotifyChangeKeyValue(System.IntPtr key, bool subtree, int filter, System.IntPtr evt, bool async);
 '@
-        $began = Get-Date
+        $ended = End-Event
+        [void]$ended.Reset()  # an end from an earlier stream does not count
         $last = [int]$steam.GetValue('RunningAppID', 0)  # whatever runs now (or a stale value) is not news
-        $evt = New-Object Threading.AutoResetEvent $false
+        $changed = New-Object Threading.AutoResetEvent $false
         Log "game watcher on (RunningAppID=$last)"
         while ($true) {
             # REG_NOTIFY_CHANGE_LAST_SET (4): fires when a value of the Steam key is written. Re-armed each time.
-            $rc = [TvWake.Reg]::RegNotifyChangeKeyValue($steam.Handle.DangerousGetHandle(), $false, 4, $evt.SafeWaitHandle.DangerousGetHandle(), $true)
+            $rc = [TvWake.Reg]::RegNotifyChangeKeyValue($steam.Handle.DangerousGetHandle(), $false, 4, $changed.SafeWaitHandle.DangerousGetHandle(), $true)
             if ($rc -ne 0) { Log "RegNotifyChangeKeyValue failed ($rc): game watcher off"; return }
-            [void]$evt.WaitOne(60000)  # a change, or once a minute to see whether the stream is over
-            $alive = ((Get-Date) - $began).TotalSeconds
-            if ((Seconds-Since 'end') -lt $alive) { Log 'stream ended: game watcher off'; return }
-            if ($alive -gt 48 * 3600) { Log 'game watcher: 48 h, stopping'; return }
+            # Sleeps until Steam writes its key or the stream ends. No timer, no polling.
+            if ([Threading.WaitHandle]::WaitAny([Threading.WaitHandle[]]@($changed, $ended)) -eq 1) { Log 'stream ended: game watcher off'; return }
             $id = [int]$steam.GetValue('RunningAppID', 0)
             if ($id -ne $last) {
                 if ($id -ne 0) { Send $Icon.game 'game.start' (Steam-Game $id) }
@@ -154,7 +157,7 @@ function Sleep-When-Idle([string]$why) {
 if (-not $Run) {
     try {
         if ($Kind -eq 'start') { Mark 'start' }  # here, not in the worker: the resume hook follows at once
-        if ($Kind -eq 'end') { Mark 'end' }      # tells the game watcher to stop
+        if ($Kind -eq 'end') { Mark 'end'; $e = End-Event; [void]$e.Set(); $e.Dispose() }  # stops the game watcher
         $a = if ($env:APOLLO_APP_NAME) { $env:APOLLO_APP_NAME } else { $env:SUNSHINE_APP_NAME }
         $c = if ($env:APOLLO_CLIENT_NAME) { $env:APOLLO_CLIENT_NAME } else { $env:SUNSHINE_CLIENT_NAME }
         $cmd = "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Dir\events.ps1`" $Kind -Run -App $(Enc $a) -Client $(Enc $c) -Dir `"$Dir`""

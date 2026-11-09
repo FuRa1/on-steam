@@ -268,7 +268,7 @@ Everything runs **on the PC**, driven by events; nothing polls. The helper is ne
 |---|---|---|
 | app started / closed | Apollo `global_prep_cmd` do / undo | `stream.start` / `stream.end` (+ session length) |
 | first client connected / all disconnected | Apollo `global_state_cmd` do / undo | `stream.resume` / `stream.pause` |
-| a Steam game starts during a stream | watcher in the start/resume worker: `RegNotifyChangeKeyValue` on `HKCU\Software\Valve\Steam` (`RunningAppID`), stops on `stream.end` | `game.start <name>` (no game.end, on purpose) |
+| a Steam game starts during a stream | watcher in the start/resume worker: sleeps on `RegNotifyChangeKeyValue` (`HKCU\Software\Valve\Steam`, `RunningAppID`) and on the named event `Global\TvWakeStreamEnded` that the end hook sets; no timer | `game.start <name>` (no game.end, on purpose) |
 | stream over (pause or app closed), nothing restarts within 30 s | the pause / end hook | `pc.sleep`, then S3 sleep (TV on or off) |
 | boot / wake / shutdown | Task Scheduler `\TvWake\` (startup; Power-Troubleshooter 1; User32 1074) | `pc.on` / `pc.wake` (asleep since HH:MM) / `pc.off` |
 | PC woken from the TV | the agent on the helper (`agent/tvwake/notify.py`) | `pc.ready` (in N s) / `pc.error` |
