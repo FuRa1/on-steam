@@ -222,8 +222,13 @@ Open:
       first; user = account e-mail, domain = `MicrosoftAccount`). BitLocker is TPM-only, so no pre-boot PIN.
 - [x] **Image quality** (fixed 2026-11-08). The starting state was Moonlight at 1080p / 10 Mbit/s and Apollo capturing
       the 3440x1440 monitor, with Big Picture opening on the monitor. The working setup:
-      - Moonlight: 3840x2160, 120 fps (60 is sharper at the same bitrate), **65 Mbit/s = the maximum
-        Moonlight allows on webOS**, H.265 on, AV1 off (the RTX 3090 cannot encode AV1), HDR off.
+      - Moonlight: **3840x2160, 60 fps, 42 Mbit/s** (since 2026-11-09), H.265 on, AV1 off (the RTX 3090
+        cannot encode AV1), HDR off. 65 Mbit/s is the maximum Moonlight allows on webOS.
+      - **Never 144 fps** (Moonlight offered it from the panel's 144 Hz): the TV's decoder cannot keep up
+        with 4K 144 at 65 Mbit/s, frames queue up and the picture lags further and further behind (minutes
+        after a while: "the input is recorded and played back later"). It looks like gamepad lag but is
+        video. Apollo then also logs `NvEnc: frame N encode wait timeout`. At 4K 60 / 42 Mbit/s: no lag,
+        no encoder errors.
       - Apollo → Applications → Steam Big Picture → **Always create Virtual Display** (`"virtual-display": true`).
       - Apollo → Audio/Video → Advanced display device options → **Device configuration =
         "Deactivate other displays and activate only the specified display"**
@@ -258,7 +263,10 @@ Open:
       dialog; then in `.env`:
       `STREAM_APP_PARAMS='{"host_uuid":"A4ED6DC5-4E97-DA21-C08C-416F2459E2BF","host_app_id":<ID>}'`
       and `scripts/deploy.sh tv`.
-- [ ] Controller: none yet. Connect it to the **TV** (Bluetooth/USB); ViGEmBus on the PC is installed.
+- [x] Controller (2026-11-09): connected to the TV, works through Apollo (ViGEmBus running; Apollo logs
+      `Gamepad N will be Xbox 360 controller`; client "LG Apollo" has all input permissions, perm 0x71F1F00).
+      Moonlight reports 3 pads: 2 x Xbox 360 + a "DualShock 4" chosen by motion sensor (probably the Magic
+      Remote). Works as is; if Steam picks the wrong player, look at that.
 
 ## 9. PC events: Telegram + sleep when a stream is over (2026-11-09)
 
