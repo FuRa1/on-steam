@@ -5,8 +5,9 @@
 #   Apollo global_prep_cmd   do: start     undo: end       (app launched / app closed)
 #   Apollo global_state_cmd  do: resume    undo: pause     (first client connected / all disconnected)
 #   Task Scheduler           boot, wake, shutdown, apollo  (Windows events; apollo = service crashed)
-#                            watch                         (at logon, as the user, elevated: countdown window with
-#                                                           Cancel / Esc x3 while a sleep/shutdown is pending, see Watch-Plan)
+#                            watch                         (at logon, as the user, elevated: countdown window while a
+#                                                           sleep/shutdown is pending; Esc x3 on the PC's own keyboard
+#                                                           takes the PC back at any time, see Watch-Local)
 # While a stream runs, the start/resume worker also watches Steam's RunningAppID (registry change
 # notifications, no polling) and reports each game that starts (game.start; no game.end on purpose).
 #
@@ -275,24 +276,87 @@ function Sleep-When-Idle([string]$why, $plan) {
     & rundll32.exe powrprof.dll,SetSuspendState 0,1,0   # hibernation is off here, so this is S3
 }
 
-function Watch-Plan {
-    # Runs at logon as the signed-in user, elevated (task \TvWake\Watch). Sleeps on the Plan event; while a
-    # plan is pending it shows a small always-on-top countdown bottom-right with a Cancel button, and also
-    # takes Esc pressed 3 times within 2 s (works with the monitor dark during a paused stream, when the
-    # window can't be seen). Only these deliberate actions cancel: a bumped mouse must not end a game.
-    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-    Add-Type -Namespace TvWake -Name Keys -MemberDefinition '[DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vKey);'
-    $plan = Named-Event 'Plan'
-    Log 'countdown watcher on'
-    while ($true) {
-        [void]$plan.WaitOne()
-        try { $p = Get-Content "$Dir\plan" -Raw | ConvertFrom-Json } catch { $p = $null }
-        if ($p) { Show-Countdown $p }
-        [void]$plan.Reset()
-    }
+function Take-Back([string]$how) {
+    # Someone at the PC wants it: cancel a pending sleep/shutdown and restart Apollo, whatever state the
+    # stream is in. That ends any session (running or paused): the TV loses the stream, Apollo's virtual
+    # display goes away and the monitor comes back. Games keep running on the monitor. With no stream,
+    # the restart costs a few seconds and nothing else.
+    $plan = $null
+    try { $plan = Get-Content "$Dir\plan" -Raw -ErrorAction Stop | ConvertFrom-Json } catch {}
+    Mark 'localuser'  # the end hook that follows the restart must not plan a new sleep
+    Remove-Item "$Dir\plan" -ErrorAction SilentlyContinue
+    Signal 'LocalUser'
+    Send $Icon.ok 'pc.stay' (J "$how at the PC" 'stream closed, monitor on' $(if ($plan) { "$($plan.kind) cancelled" }))
+    Log 'restarting Apollo'
+    Restart-Service ApolloService -Force
 }
 
-function Show-Countdown($p) {
+function Watch-Local {
+    # Runs at logon as the signed-in user, elevated (task \TvWake\Watch), with a message loop:
+    #  - a low-level keyboard hook counts Esc presses from the PC's OWN keyboard (injected input, which is
+    #    what Apollo produces for the TV's keyboard/remote, is ignored; a held key counts once). 3 within
+    #    2 s = Take-Back. Works whether or not a stream runs and with the monitor dark.
+    #  - while a sleep/shutdown is pending (Plan event), a countdown window bottom-right with Cancel.
+    # No reaction to mouse movement: a bumped desk must not end someone's game.
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    Add-Type -TypeDefinition @'
+using System; using System.Collections.Generic; using System.Runtime.InteropServices;
+namespace TvWake {
+  public static class EscHook {
+    delegate IntPtr Proc(int code, IntPtr msg, IntPtr data);
+    static readonly Proc proc = Hook;
+    static IntPtr handle = IntPtr.Zero;
+    static readonly Queue<DateTime> presses = new Queue<DateTime>();
+    static bool down;
+    static volatile bool hit;
+    public static bool Start() { handle = SetWindowsHookEx(13, proc, GetModuleHandle(null), 0); return handle != IntPtr.Zero; }
+    public static bool Take() { if (!hit) return false; hit = false; return true; }
+    static IntPtr Hook(int code, IntPtr msg, IntPtr data) {
+      if (code >= 0) {
+        int vk = Marshal.ReadInt32(data), flags = Marshal.ReadInt32(data, 8), m = msg.ToInt32();
+        bool injected = (flags & 0x10) != 0;                 // LLKHF_INJECTED: SendInput, i.e. Apollo
+        if (vk == 0x1B && !injected) {
+          if (m == 0x100 || m == 0x104) {                    // key down
+            if (!down) {                                     // auto-repeat of a held key does not count
+              var now = DateTime.UtcNow;
+              presses.Enqueue(now);
+              while (presses.Count > 0 && (now - presses.Peek()).TotalSeconds > 2) presses.Dequeue();
+              if (presses.Count >= 3) { presses.Clear(); hit = true; }
+            }
+            down = true;
+          } else if (m == 0x101 || m == 0x105) down = false; // key up
+        }
+      }
+      return CallNextHookEx(handle, code, msg, data);
+    }
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetWindowsHookEx(int id, Proc fn, IntPtr mod, uint thread);
+    [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr h, int code, IntPtr msg, IntPtr data);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr GetModuleHandle(string name);
+  }
+}
+'@
+    if (-not [TvWake.EscHook]::Start()) { Log 'keyboard hook failed: Esc x3 off' } else { Log 'local watcher on (Esc x3, countdown)' }
+    $planEvent = Named-Event 'Plan'
+    $script:countdown = $null
+    $loop = New-Object Windows.Forms.Timer; $loop.Interval = 200   # in-process checks only
+    $loop.Add_Tick({
+        try {
+            if ([TvWake.EscHook]::Take()) {
+                if ($script:countdown -and -not $script:countdown.IsDisposed) { $script:countdown.Close() }
+                Take-Back 'Esc x3'
+            }
+            if ((-not $script:countdown -or $script:countdown.IsDisposed) -and $planEvent.WaitOne(0)) {
+                [void]$planEvent.Reset()
+                try { $p = Get-Content "$Dir\plan" -Raw | ConvertFrom-Json } catch { $p = $null }
+                if ($p) { $script:countdown = New-Countdown $p; $script:countdown.Show() }
+            }
+        } catch { Log "watcher: $($_.Exception.Message)" }
+    })
+    $loop.Start()
+    [Windows.Forms.Application]::Run()
+}
+
+function New-Countdown($p) {
     $at = [datetime]$p.at
     $f = New-Object Windows.Forms.Form
     $f.FormBorderStyle = 'None'; $f.TopMost = $true; $f.ShowInTaskbar = $false; $f.StartPosition = 'Manual'
@@ -306,47 +370,22 @@ function Show-Countdown($p) {
     $small = New-Object Windows.Forms.Label
     $small.Font = New-Object Drawing.Font('Segoe UI', 9); $small.AutoSize = $false; $small.Size = New-Object Drawing.Size(200, 40)
     $small.Location = New-Object Drawing.Point(16, 60); $small.ForeColor = [Drawing.Color]::FromArgb(170, 180, 195)
-    $small.Text = "$(if ($p.kind -eq 'shutdown') { 'PC shuts down' } else { 'PC goes to sleep' })`n$(($p.why -replace "$([regex]::Escape($Dot))", ', '))"
+    $small.Text = "$(if ($p.kind -eq 'shutdown') { 'PC shuts down' } else { 'PC goes to sleep' })`nEsc x3 or Cancel to stay"
     $btn = New-Object Windows.Forms.Button
     $btn.Text = 'Cancel'; $btn.Size = New-Object Drawing.Size(100, 40); $btn.Location = New-Object Drawing.Point(226, 52)
     $btn.FlatStyle = 'Flat'; $btn.BackColor = [Drawing.Color]::FromArgb(60, 66, 80); $btn.ForeColor = [Drawing.Color]::White
-    $cancel = {
-        param([string]$how)
-        Mark 'localuser'
-        Remove-Item "$Dir\plan" -ErrorAction SilentlyContinue
-        Signal 'LocalUser'
-        # A paused stream keeps the monitor off (only Apollo's virtual display is on): end the session so
-        # the monitor comes back. The game keeps running on the monitor; the TV can't resume it any more.
-        $paused = (Select-String -Path $ApolloLog -Pattern 'New streaming session|Session resuming|Session pausing' | Select-Object -Last 1).Line -match 'Session pausing'
-        Send $Icon.ok 'pc.stay' (J "$($p.kind) cancelled at the PC ($how)" $(if ($paused) { 'stream closed, monitor on' }))
-        $f.Close()
-        if ($paused) { Log 'restarting Apollo to end the paused stream'; Restart-Service ApolloService -Force }
-    }
-    $btn.Add_Click({ & $cancel 'Cancel' })
+    $btn.Add_Click({ $f.Close(); Take-Back 'Cancel' }.GetNewClosure())
     $f.Controls.AddRange(@($big, $small, $btn))
     $tick = New-Object Windows.Forms.Timer; $tick.Interval = 500
     $update = {
         $left = [int][math]::Ceiling(($at - (Get-Date)).TotalSeconds)
-        if (-not (Test-Path "$Dir\plan") -or $left -lt -5) { $f.Close(); return }  # done, or cancelled elsewhere
+        if (-not (Test-Path "$Dir\plan") -or $left -lt -5) { $tick.Stop(); $f.Close(); return }  # done, or cancelled elsewhere
         $left = [math]::Max(0, $left)
         $big.Text = '{0}:{1:00}' -f [math]::Floor($left / 60), ($left % 60)
-    }
+    }.GetNewClosure()
     $tick.Add_Tick($update); & $update; $tick.Start()
-    # Esc x3 within 2 s, checked every 50 ms (key state is global: works whatever window has the focus).
-    $esc = @{ down = $true; times = @() }  # "down" at start: a key held from before does not count
-    $keys = New-Object Windows.Forms.Timer; $keys.Interval = 50
-    $keys.Add_Tick({
-        $down = ([TvWake.Keys]::GetAsyncKeyState(0x1B) -band 0x8000) -ne 0
-        if ($down -and -not $esc.down) {
-            $now = Get-Date
-            $esc.times = @($esc.times | Where-Object { ($now - $_).TotalSeconds -lt 2 }) + $now
-            if ($esc.times.Count -ge 3) { $keys.Stop(); & $cancel 'Esc x3' }
-        }
-        $esc.down = $down
-    })
-    $keys.Start()
-    [void]$f.ShowDialog()
-    $tick.Stop(); $tick.Dispose(); $keys.Stop(); $keys.Dispose(); $f.Dispose()
+    $f.Add_FormClosed({ $tick.Stop(); $tick.Dispose() }.GetNewClosure())
+    $f
 }
 
 # ---- hook mode: hand over to a detached copy and return to Apollo at once -----------------------
@@ -442,7 +481,7 @@ try {
             $state = if ($svc -and $svc.Status -eq 'Running') { 'restarted by Windows' } else { 'still stopped: no streaming until it runs' }
             Send $Icon.err 'apollo.down' (J 'Apollo service crashed' $state)
         }
-        'watch'    { Watch-Plan }
+        'watch'    { Watch-Local }
         'test'     { $s = Settings; Send $Icon.ok 'events.ok' "auto-sleep: $($s.autosleep)" }
         default  { Log "unknown event" }
     }
