@@ -10,7 +10,8 @@
 #                                backup next to it; ApolloService is restarted
 #   Task Scheduler \TvWake\      Boot (at startup), Wake (Power-Troubleshooter 1), Shutdown (User32 1074),
 #                                ApolloCrash (Service Control Manager 7031/7034 for the Apollo service),
-#                                Watch (at logon, as you: countdown window with Cancel while a sleep/shutdown is pending)
+#                                Watch (at logon, as you, elevated: countdown window with Cancel / Esc x3 while a
+#                                sleep/shutdown is pending)
 # It also removes the old helper ssh key (tvwake-autosleep) if it is still there.
 param([string]$EnvFile = (Join-Path $PSScriptRoot '..\.env'), [switch]$Uninstall)
 $ErrorActionPreference = 'Stop'
@@ -108,7 +109,8 @@ if ($apolloName) {
 
 # The countdown window must run in the signed-in user's desktop session: a task as that user, at logon.
 $me = "$env:USERDOMAIN\$env:USERNAME"
-$userPrincipal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
+# Elevated (no UAC prompt for an admin account in a task): Esc x3 may restart the Apollo service.
+$userPrincipal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Highest
 $watchOpts = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -match 'events\.ps1.* watch -Run' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }   # an older copy

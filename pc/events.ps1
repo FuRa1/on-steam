@@ -5,8 +5,8 @@
 #   Apollo global_prep_cmd   do: start     undo: end       (app launched / app closed)
 #   Apollo global_state_cmd  do: resume    undo: pause     (first client connected / all disconnected)
 #   Task Scheduler           boot, wake, shutdown, apollo  (Windows events; apollo = service crashed)
-#                            watch                         (at logon, as the user: shows a countdown window with
-#                                                           Cancel while a sleep/shutdown is pending, see Watch-Plan)
+#                            watch                         (at logon, as the user, elevated: countdown window with
+#                                                           Cancel / Esc x3 while a sleep/shutdown is pending, see Watch-Plan)
 # While a stream runs, the start/resume worker also watches Steam's RunningAppID (registry change
 # notifications, no polling) and reports each game that starts (game.start; no game.end on purpose).
 #
@@ -276,10 +276,12 @@ function Sleep-When-Idle([string]$why, $plan) {
 }
 
 function Watch-Plan {
-    # Runs at logon as the signed-in user (task \TvWake\Watch). Sleeps on the Plan event; while a plan is
-    # pending it shows a small always-on-top countdown in the bottom-right corner with a Cancel button.
-    # Only a deliberate click cancels (a bumped mouse must not end someone's paused game).
+    # Runs at logon as the signed-in user, elevated (task \TvWake\Watch). Sleeps on the Plan event; while a
+    # plan is pending it shows a small always-on-top countdown bottom-right with a Cancel button, and also
+    # takes Esc pressed 3 times within 2 s (works with the monitor dark during a paused stream, when the
+    # window can't be seen). Only these deliberate actions cancel: a bumped mouse must not end a game.
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    Add-Type -Namespace TvWake -Name Keys -MemberDefinition '[DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vKey);'
     $plan = Named-Event 'Plan'
     Log 'countdown watcher on'
     while ($true) {
@@ -308,13 +310,19 @@ function Show-Countdown($p) {
     $btn = New-Object Windows.Forms.Button
     $btn.Text = 'Cancel'; $btn.Size = New-Object Drawing.Size(100, 40); $btn.Location = New-Object Drawing.Point(226, 52)
     $btn.FlatStyle = 'Flat'; $btn.BackColor = [Drawing.Color]::FromArgb(60, 66, 80); $btn.ForeColor = [Drawing.Color]::White
-    $btn.Add_Click({
+    $cancel = {
+        param([string]$how)
         Mark 'localuser'
         Remove-Item "$Dir\plan" -ErrorAction SilentlyContinue
         Signal 'LocalUser'
-        Send $Icon.ok 'pc.stay' "$($p.kind) cancelled at the PC"
+        # A paused stream keeps the monitor off (only Apollo's virtual display is on): end the session so
+        # the monitor comes back. The game keeps running on the monitor; the TV can't resume it any more.
+        $paused = (Select-String -Path $ApolloLog -Pattern 'New streaming session|Session resuming|Session pausing' | Select-Object -Last 1).Line -match 'Session pausing'
+        Send $Icon.ok 'pc.stay' (J "$($p.kind) cancelled at the PC ($how)" $(if ($paused) { 'stream closed, monitor on' }))
         $f.Close()
-    })
+        if ($paused) { Log 'restarting Apollo to end the paused stream'; Restart-Service ApolloService -Force }
+    }
+    $btn.Add_Click({ & $cancel 'Cancel' })
     $f.Controls.AddRange(@($big, $small, $btn))
     $tick = New-Object Windows.Forms.Timer; $tick.Interval = 500
     $update = {
@@ -324,8 +332,21 @@ function Show-Countdown($p) {
         $big.Text = '{0}:{1:00}' -f [math]::Floor($left / 60), ($left % 60)
     }
     $tick.Add_Tick($update); & $update; $tick.Start()
+    # Esc x3 within 2 s, checked every 50 ms (key state is global: works whatever window has the focus).
+    $esc = @{ down = $true; times = @() }  # "down" at start: a key held from before does not count
+    $keys = New-Object Windows.Forms.Timer; $keys.Interval = 50
+    $keys.Add_Tick({
+        $down = ([TvWake.Keys]::GetAsyncKeyState(0x1B) -band 0x8000) -ne 0
+        if ($down -and -not $esc.down) {
+            $now = Get-Date
+            $esc.times = @($esc.times | Where-Object { ($now - $_).TotalSeconds -lt 2 }) + $now
+            if ($esc.times.Count -ge 3) { $keys.Stop(); & $cancel 'Esc x3' }
+        }
+        $esc.down = $down
+    })
+    $keys.Start()
     [void]$f.ShowDialog()
-    $tick.Stop(); $tick.Dispose(); $f.Dispose()
+    $tick.Stop(); $tick.Dispose(); $keys.Stop(); $keys.Dispose(); $f.Dispose()
 }
 
 # ---- hook mode: hand over to a detached copy and return to Apollo at once -----------------------
