@@ -92,7 +92,7 @@ scripts/deploy.sh agent        # copy repo + .env to the helper, (re)install age
 scripts/deploy.sh tv           # build the IPK on the helper and install it on the TV
 scripts/deploy.sh agent tv     # both
 ```
-Tests: on the helper `cd agent && .venv/bin/python -m pytest -q` (63 tests);
+Tests: on the helper `cd agent && .venv/bin/python -m pytest -q` (65 tests);
 `node tv-app/tests/hmac-test.js`.
 
 ### From the MacBook (verified 2026-11-09)
@@ -234,10 +234,10 @@ Open:
         when the app is quit.
       - Apollo → **Headless Mode = on** (`headless_mode = enabled`): every app starts in a virtual display.
       - Apollo → **Config revert on disconnect = on** (`dd_config_revert_on_disconnect = enabled`, 2026-11-09).
-        Without it, turning the TV off mid-game only *pauses* the session and the monitor stays dark until
-        the app is quit. Now the monitor comes back as soon as the TV disconnects; the game keeps running and
-        the display setup is applied again on reconnect. (A TV-side fix cannot work: the remote's power
-        button kills the app.)
+        **Does not help with a paused session** (tested): turning the TV off mid-game only *pauses* it,
+        Apollo keeps the virtual display, and the monitor stays dark until the app is quit. That is why the
+        PC now puts itself to sleep on a pause with the TV off (§9); "PC Game" then resumes the same game.
+        (A TV-side fix cannot work: the remote's power button kills the TV apps.)
       - Backup of the previous config: `config\sunshine.conf.bak-20261109`.
       - Verified in `sunshine.log`: `Capture size 3840x2160`, `Display refresh rate [120Hz]`; the virtual
         display is primary during the stream and the monitor stays on.

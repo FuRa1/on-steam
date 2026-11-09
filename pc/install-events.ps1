@@ -100,4 +100,6 @@ Register-ScheduledTask -TaskPath $TaskPath -TaskName 'Shutdown' -Action (Task-Ac
 
 Write-Host "Installed. AUTOSLEEP=$mode, telegram=$([bool]$settings.telegram_bot_token), TV=$($settings.tv_ip)"
 Write-Host "Log: $Dir\events.log"
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Dir\events.ps1" test -Run
+# Same path as an Apollo hook (hook mode -> detached worker via WMI), so the test message proves all of it.
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Dir\events.ps1" test
+Write-Host 'A test message should arrive in Telegram within a few seconds.'
