@@ -5,6 +5,8 @@
 #   Apollo global_prep_cmd   do: start     undo: end       (app launched / app closed)
 #   Apollo global_state_cmd  do: resume    undo: pause     (first client connected / all disconnected)
 #   Task Scheduler           boot, wake, shutdown, apollo  (Windows events; apollo = service crashed)
+#                            watch                         (at logon, as the user: shows a countdown window with
+#                                                           Cancel while a sleep/shutdown is pending, see Watch-Plan)
 # While a stream runs, the start/resume worker also watches Steam's RunningAppID (registry change
 # notifications, no polling) and reports each game that starts (game.start; no game.end on purpose).
 #
@@ -56,7 +58,7 @@ $Live = U 0x1F535; $Idle = U 0x26AA, 0xFE0F; $Power = U 0x1F7E3; $Good = U 0x1F7
 $Mark = @{
     'stream.start' = $Live; 'stream.resume' = $Live; 'stream.pause' = $Idle; 'stream.end' = $Idle; 'game.start' = $Live
     'pc.sleep' = $Power; 'pc.wake' = $Power; 'pc.on' = $Power; 'pc.off' = $Power; 'events.ok' = $Good
-    'pc.crash' = $Bad; 'apollo.down' = $Bad
+    'pc.crash' = $Bad; 'apollo.down' = $Bad; 'pc.stay' = $Good
 }
 function Html([string]$x) { $x.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;') }
 function Send([string]$icon, [string]$key, [string]$detail) {
@@ -104,13 +106,26 @@ function Duration([double]$sec) {
 # Named events between the hooks and the waiting workers (no timers, no polling):
 #   StreamEnded: set by the end hook; stops the game watcher.
 #   StreamBack:  set by the start/resume hooks; cancels a pending sleep or shutdown at once.
-function Named-Event([string]$name) { New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, "Global\TvWake$name") }
+#   Plan:        set while a sleep/shutdown is pending; wakes the countdown window.
+#   LocalUser:   set when someone presses Cancel in that window; cancels the pending plan.
+# Created with an explicit DACL so processes of any integrity level (Apollo hooks, WMI workers, the
+# logon task) can all open them.
+function Named-Event([string]$name) {
+    $sec = New-Object Security.AccessControl.EventWaitHandleSecurity
+    foreach ($sid in 'S-1-5-11', 'S-1-5-18') {  # Authenticated Users, SYSTEM
+        $who = New-Object Security.Principal.SecurityIdentifier $sid
+        $sec.AddAccessRule((New-Object Security.AccessControl.EventWaitHandleAccessRule($who, 'FullControl', 'Allow')))
+    }
+    $created = $false
+    New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, "Global\TvWake$name", [ref]$created, $sec)
+}
 function End-Event { Named-Event 'StreamEnded' }
 function Signal([string]$name) { $e = Named-Event $name; [void]$e.Set(); $e.Dispose() }
 
 # A pending sleep/shutdown, so the next start/resume message can say it was cancelled.
-function Save-Plan([string]$kind, [double]$wait) {
-    Set-Content "$Dir\plan" (@{ kind = $kind; until = (Get-Date).AddSeconds($wait + 60).ToString('o') } | ConvertTo-Json -Compress)
+function Save-Plan([string]$kind, [double]$wait, [string]$why) {
+    $at = (Get-Date).AddSeconds($wait)
+    Set-Content "$Dir\plan" (@{ kind = $kind; why = $why; at = $at.ToString('o'); until = $at.AddSeconds(60).ToString('o') } | ConvertTo-Json -Compress)
 }
 function Take-Plan {
     try { $p = Get-Content "$Dir\plan" -Raw -ErrorAction Stop | ConvertFrom-Json } catch { return '' }
@@ -203,12 +218,14 @@ function Running-Game {
 
 function Idle-Plan {
     # What happens once a stream stopped, decided up front so the pause/end message can say it.
+    # Nothing right after someone pressed Cancel at the PC.
     # Many games do not survive S3 (the GPU is powered off; they hang or show black after waking), and
     # not every game can be closed from here (elevated or anti-cheat protected processes, non-Steam
     # games). So: no game -> sleep after 30 s. A game left running -> give it AUTOSLEEP_GAME_MIN for a
     # break, then shut the PC down (forced): the next start is a cold boot (~1 min) but always clean.
     $s = Settings
     if ($s.autosleep -eq 'off') { return $null }
+    if ((Seconds-Since 'localuser') -lt 120) { return @{ wait = 0; kind = ''; text = 'someone is at the PC, staying on'; none = $true } }
     $wait = [double]$s.autosleep_after_s + $SettleSeconds
     $game = Running-Game
     $at = { param($sec) (Get-Date).AddSeconds($sec).ToString('HH:mm') }
@@ -227,14 +244,17 @@ function Idle-Plan {
 }
 
 function Sleep-When-Idle([string]$why, $plan) {
-    if (-not $plan) { return }  # auto-sleep off
+    if (-not $plan -or $plan.none) { return }  # auto-sleep off, or someone is at the PC
     $s = Settings
     Log "plan: $($plan.text)"
-    Save-Plan $plan.kind $plan.wait
-    $back = Named-Event 'StreamBack'
-    [void]$back.Reset()  # a reconnect before this point is still caught by the count below
+    Save-Plan $plan.kind $plan.wait $plan.text
+    $back = Named-Event 'StreamBack'; $local = Named-Event 'LocalUser'
+    [void]$back.Reset(); [void]$local.Reset()  # a reconnect before this point is still caught by the count below
+    $pending = Named-Event 'Plan'; [void]$pending.Set()  # wake the countdown window
     $before = Stream-Starts
-    if ($back.WaitOne([int]($plan.wait * 1000))) { Log 'stream is back: plan cancelled'; return }  # the start/resume message says so
+    $hit = [Threading.WaitHandle]::WaitAny([Threading.WaitHandle[]]@($back, $local), [int]($plan.wait * 1000))
+    if ($hit -eq 0) { Log 'stream is back: plan cancelled'; return }  # the start/resume message says so
+    if ($hit -eq 1) { Log 'cancelled at the PC'; return }  # the countdown window said so
     $after = Stream-Starts
     if ($after -ne $before) { Log "stream started again ($before -> $after): not sleeping"; return }
     Remove-Item "$Dir\plan" -ErrorAction SilentlyContinue
@@ -253,6 +273,59 @@ function Sleep-When-Idle([string]$why, $plan) {
     Send $Icon.sleep 'pc.sleep' "$why, going to sleep"
     Log 'sleeping'
     & rundll32.exe powrprof.dll,SetSuspendState 0,1,0   # hibernation is off here, so this is S3
+}
+
+function Watch-Plan {
+    # Runs at logon as the signed-in user (task \TvWake\Watch). Sleeps on the Plan event; while a plan is
+    # pending it shows a small always-on-top countdown in the bottom-right corner with a Cancel button.
+    # Only a deliberate click cancels (a bumped mouse must not end someone's paused game).
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $plan = Named-Event 'Plan'
+    Log 'countdown watcher on'
+    while ($true) {
+        [void]$plan.WaitOne()
+        try { $p = Get-Content "$Dir\plan" -Raw | ConvertFrom-Json } catch { $p = $null }
+        if ($p) { Show-Countdown $p }
+        [void]$plan.Reset()
+    }
+}
+
+function Show-Countdown($p) {
+    $at = [datetime]$p.at
+    $f = New-Object Windows.Forms.Form
+    $f.FormBorderStyle = 'None'; $f.TopMost = $true; $f.ShowInTaskbar = $false; $f.StartPosition = 'Manual'
+    $f.BackColor = [Drawing.Color]::FromArgb(24, 28, 36); $f.ForeColor = [Drawing.Color]::White
+    $f.Size = New-Object Drawing.Size(340, 108); $f.Opacity = 0.94
+    $wa = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    $f.Location = New-Object Drawing.Point(($wa.Right - $f.Width - 16), ($wa.Bottom - $f.Height - 16))
+    $big = New-Object Windows.Forms.Label
+    $big.Font = New-Object Drawing.Font('Consolas', 28, [Drawing.FontStyle]::Bold); $big.AutoSize = $true
+    $big.Location = New-Object Drawing.Point(14, 8)
+    $small = New-Object Windows.Forms.Label
+    $small.Font = New-Object Drawing.Font('Segoe UI', 9); $small.AutoSize = $false; $small.Size = New-Object Drawing.Size(200, 40)
+    $small.Location = New-Object Drawing.Point(16, 60); $small.ForeColor = [Drawing.Color]::FromArgb(170, 180, 195)
+    $small.Text = "$(if ($p.kind -eq 'shutdown') { 'PC shuts down' } else { 'PC goes to sleep' })`n$(($p.why -replace "$([regex]::Escape($Dot))", ', '))"
+    $btn = New-Object Windows.Forms.Button
+    $btn.Text = 'Cancel'; $btn.Size = New-Object Drawing.Size(100, 40); $btn.Location = New-Object Drawing.Point(226, 52)
+    $btn.FlatStyle = 'Flat'; $btn.BackColor = [Drawing.Color]::FromArgb(60, 66, 80); $btn.ForeColor = [Drawing.Color]::White
+    $btn.Add_Click({
+        Mark 'localuser'
+        Remove-Item "$Dir\plan" -ErrorAction SilentlyContinue
+        Signal 'LocalUser'
+        Send $Icon.ok 'pc.stay' "$($p.kind) cancelled at the PC"
+        $f.Close()
+    })
+    $f.Controls.AddRange(@($big, $small, $btn))
+    $tick = New-Object Windows.Forms.Timer; $tick.Interval = 500
+    $update = {
+        $left = [int][math]::Ceiling(($at - (Get-Date)).TotalSeconds)
+        if (-not (Test-Path "$Dir\plan") -or $left -lt -5) { $f.Close(); return }  # done, or cancelled elsewhere
+        $left = [math]::Max(0, $left)
+        $big.Text = '{0}:{1:00}' -f [math]::Floor($left / 60), ($left % 60)
+    }
+    $tick.Add_Tick($update); & $update; $tick.Start()
+    [void]$f.ShowDialog()
+    $tick.Stop(); $tick.Dispose(); $f.Dispose()
 }
 
 # ---- hook mode: hand over to a detached copy and return to Apollo at once -----------------------
@@ -348,6 +421,7 @@ try {
             $state = if ($svc -and $svc.Status -eq 'Running') { 'restarted by Windows' } else { 'still stopped: no streaming until it runs' }
             Send $Icon.err 'apollo.down' (J 'Apollo service crashed' $state)
         }
+        'watch'    { Watch-Plan }
         'test'     { $s = Settings; Send $Icon.ok 'events.ok' "auto-sleep: $($s.autosleep)" }
         default  { Log "unknown event" }
     }

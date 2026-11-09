@@ -282,6 +282,7 @@ Everything runs **on the PC**, driven by events; nothing polls. The helper is ne
 | boot | Task Scheduler `\TvWake\Boot` (startup + 30 s) | `pc.on cold boot · signed in after N s` (or "nobody signed in after 2 min"); `pc.crash` first if 6008 / Kernel-Power 41 since boot |
 | wake | `\TvWake\Wake` (Power-Troubleshooter 1) | `pc.wake asleep since HH:MM · by network (Wake-on-LAN)` / power button / keyboard or mouse |
 | shutdown | `\TvWake\Shutdown` (User32 1074) | `pc.off <type> · <Windows Update / Start menu, user / process, user>`; quiet when events.ps1 shut down itself |
+| a sleep/shutdown is pending | `\TvWake\Watch` (at logon, as the user; sleeps on the named event `Global\TvWakePlan`) | countdown window bottom-right (`14:32`, what and why) with **Cancel**; Cancel → `pc.stay … cancelled at the PC` and no new plan for 2 min. Not visible while a stream is paused (only Apollo's virtual display is on). No auto-cancel on mouse movement on purpose: a bumped desk must not end someone's paused game. |
 | Apollo service crashed | `\TvWake\ApolloCrash` (SCM 7031/7034; Windows 11 logs no plain 7036 stop events) | `apollo.down Apollo service crashed · restarted by Windows / still stopped` |
 | PC woken from the TV | the agent on the helper (`agent/tvwake/notify.py`) | `pc.ready` (in N s) / `pc.error` |
 | dev mode renewal fails or < 100 h left | `tvwake-devmode` timer on the helper | `tv.devmode <error> · N h left` (at most every 12 h), then once `renewed again` |

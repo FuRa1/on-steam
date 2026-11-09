@@ -9,7 +9,8 @@
 #   Apollo sunshine.conf         global_prep_cmd (start/end) and global_state_cmd (resume/pause);
 #                                backup next to it; ApolloService is restarted
 #   Task Scheduler \TvWake\      Boot (at startup), Wake (Power-Troubleshooter 1), Shutdown (User32 1074),
-#                                ApolloCrash (Service Control Manager 7031/7034 for the Apollo service)
+#                                ApolloCrash (Service Control Manager 7031/7034 for the Apollo service),
+#                                Watch (at logon, as you: countdown window with Cancel while a sleep/shutdown is pending)
 # It also removes the old helper ssh key (tvwake-autosleep) if it is still there.
 param([string]$EnvFile = (Join-Path $PSScriptRoot '..\.env'), [switch]$Uninstall)
 $ErrorActionPreference = 'Stop'
@@ -104,6 +105,15 @@ if ($apolloName) {
     $xp = "*[System[Provider[@Name='Service Control Manager'] and (EventID=7031 or EventID=7034)]] and *[EventData[Data[@Name='param1']='$apolloName']]"
     Register-ScheduledTask -TaskPath $TaskPath -TaskName 'ApolloCrash' -Action (Task-Action 'apollo') -Trigger (Event-Trigger '' 0 $xp) -Principal $principal -Settings $opts -Force | Out-Null
 }
+
+# The countdown window must run in the signed-in user's desktop session: a task as that user, at logon.
+$me = "$env:USERDOMAIN\$env:USERNAME"
+$userPrincipal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
+$watchOpts = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -match 'events\.ps1.* watch -Run' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }   # an older copy
+Register-ScheduledTask -TaskPath $TaskPath -TaskName 'Watch' -Action (Task-Action 'watch') -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $me) -Principal $userPrincipal -Settings $watchOpts -Force | Out-Null
+Start-ScheduledTask -TaskPath $TaskPath -TaskName 'Watch'   # you are signed in already
 
 Write-Host "Installed. AUTOSLEEP=$mode, telegram=$([bool]$settings.telegram_bot_token)"
 Write-Host "Log: $Dir\events.log"
