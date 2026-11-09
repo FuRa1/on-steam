@@ -184,7 +184,7 @@ With Quick Start+ the TV keeps answering on the network (port 3001, sometimes 99
 | Driver `ViGEmBus` | virtual Xbox controller for controllers connected to the TV |
 | Desktop shortcuts **TV On** / **TV Off** | run `pc\tv-power.cmd on\|off` → `ssh l590` → `scripts/tv-on.sh` / `tv-off.sh`. Recreate with `powershell -ExecutionPolicy Bypass -File pc\make-shortcuts.ps1` (uses Windows OpenSSH and the `l590` alias from `%USERPROFILE%\.ssh\config`; override with env `TVWAKE_HELPER_SSH`). |
 | `pc\setup-windows.ps1` (this repo) | run once as admin; already done on MoralMe (Private network, ping rule, Fast Startup off, NIC wake, no sign-in after sleep, password sign-in allowed) |
-| Steam | Run entry `steam.exe -silent`, remembers login. **But** (2026-11-09) every HKCU Run entry is marked disabled in `StartupApproved\Run` (value `01 00 00 00`), so after auto-login nothing from it starts, Steam included. Fix: Task Manager → Startup apps → Steam → Enable, or a logon task in Task Scheduler. |
+| Steam | Run entry `steam.exe -silent`, remembers login, **enabled** in Task Manager → Startup apps (2026-11-09; `StartupApproved\Run` value `00…`; it was `01…` = disabled before, and then nothing from the Run key started). Starts ~1 min after boot. |
 | Auto-login | Sysinternals Autologon (winget), set with `pc\set-autologon.ps1`: user `grevtsov.b@protonmail.com`, domain `MicrosoftAccount`, password stored as an LSA secret. Off again: `set-autologon.ps1 -Disable`. |
 | `config\sunshine.conf` | `dd_configuration_option = ensure_only_display`, `headless_mode = enabled`, `dd_config_revert_on_disconnect = enabled` (see §8) |
 
@@ -249,9 +249,9 @@ Open:
       - Start apps **from Moonlight**, not from Apollo's web UI. A web-UI launch creates the virtual display
         in the fallback mode (1920x1080x60), and the TV then *resumes* that session. If it happens:
         Quit the app in Moonlight and start it again.
-- [ ] **Steam does not start after auto-login** (cause found 2026-11-09): all HKCU Run entries are
-      disabled in `StartupApproved` (see §6). Enable Steam in Task Manager → Startup apps, or add a
-      logon task. Until then the agent's "ready" (Apollo port) comes before Steam.
+- [x] **Steam starts after auto-login** (2026-11-09): enabled in Startup apps; after a cold boot at
+      13:42:44 Steam was running at 13:43:46. The agent's "ready" (Apollo port) can still come before
+      Steam; Big Picture then starts Steam itself.
 - [x] **PC left on after the TV is switched off** (2026-11-09): `pc/events.ps1`, see §9. Verified by
       hand: TV off → paused session → PC sleeps → "PC Game" → WoL wakes it in ~1.5 s, agent ready
       9 s after the button, Moonlight **resumes the same game**.
