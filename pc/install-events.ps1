@@ -8,7 +8,8 @@
 #   C:\ProgramData\tvwake\       events.ps1, events.json (settings), events.log
 #   Apollo sunshine.conf         global_prep_cmd (start/end) and global_state_cmd (resume/pause);
 #                                backup next to it; ApolloService is restarted
-#   Task Scheduler \TvWake\      Boot (at startup), Wake (Power-Troubleshooter 1), Shutdown (User32 1074)
+#   Task Scheduler \TvWake\      Boot (at startup), Wake (Power-Troubleshooter 1), Shutdown (User32 1074),
+#                                ApolloCrash (Service Control Manager 7031/7034 for the Apollo service)
 # It also removes the old helper ssh key (tvwake-autosleep) if it is still there.
 param([string]$EnvFile = (Join-Path $PSScriptRoot '..\.env'), [switch]$Uninstall)
 $ErrorActionPreference = 'Stop'
@@ -83,11 +84,12 @@ Set-ApolloHooks @("global_prep_cmd = $prep", "global_state_cmd = $state")
 function Task-Action([string]$e) {
     New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Dir\events.ps1`" $e -Run"
 }
-function Event-Trigger([string]$provider, [int]$id) {
+function Event-Trigger([string]$provider, [int]$id, [string]$xpath) {
+    if (-not $xpath) { $xpath = "*[System[Provider[@Name='$provider'] and EventID=$id]]" }
     $cls = Get-CimClass -ClassName MSFT_TaskEventTrigger -Namespace Root/Microsoft/Windows/TaskScheduler
     $t = New-CimInstance -CimClass $cls -ClientOnly
     $t.Enabled = $true
-    $t.Subscription = "<QueryList><Query Id='0' Path='System'><Select Path='System'>*[System[Provider[@Name='$provider'] and EventID=$id]]</Select></Query></QueryList>"
+    $t.Subscription = "<QueryList><Query Id='0' Path='System'><Select Path='System'>$xpath</Select></Query></QueryList>"
     $t
 }
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
@@ -96,6 +98,12 @@ $boot = New-ScheduledTaskTrigger -AtStartup; $boot.Delay = 'PT30S'   # give the 
 Register-ScheduledTask -TaskPath $TaskPath -TaskName 'Boot' -Action (Task-Action 'boot') -Trigger $boot -Principal $principal -Settings $opts -Force | Out-Null
 Register-ScheduledTask -TaskPath $TaskPath -TaskName 'Wake' -Action (Task-Action 'wake') -Trigger (Event-Trigger 'Microsoft-Windows-Power-Troubleshooter' 1) -Principal $principal -Settings $opts -Force | Out-Null
 Register-ScheduledTask -TaskPath $TaskPath -TaskName 'Shutdown' -Action (Task-Action 'shutdown') -Trigger (Event-Trigger 'User32' 1074) -Principal $principal -Settings $opts -Force | Out-Null
+# The Apollo service crashed (7031: terminated unexpectedly, 7034: ...and no recovery action).
+$apolloName = (Get-Service ApolloService -ErrorAction SilentlyContinue).DisplayName
+if ($apolloName) {
+    $xp = "*[System[Provider[@Name='Service Control Manager'] and (EventID=7031 or EventID=7034)]] and *[EventData[Data[@Name='param1']='$apolloName']]"
+    Register-ScheduledTask -TaskPath $TaskPath -TaskName 'ApolloCrash' -Action (Task-Action 'apollo') -Trigger (Event-Trigger '' 0 $xp) -Principal $principal -Settings $opts -Force | Out-Null
+}
 
 Write-Host "Installed. AUTOSLEEP=$mode, telegram=$([bool]$settings.telegram_bot_token)"
 Write-Host "Log: $Dir\events.log"

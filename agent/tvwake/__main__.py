@@ -43,6 +43,10 @@ def main(argv: list[str] | None = None) -> int:
     if notify.enabled(cfg) and not cfg.mock_pc:
         notifier = lambda text: notify.send(cfg, text)  # noqa: E731
     manager = WakeManager(cfg, probes, clock, notifier)
+    if notifier is not None:
+        text = notify.boot_notice(notify.system_uptime_s())
+        if text:
+            notifier(text)
     app = create_app(cfg, manager)
     log.info("listening on %s:%s (backend %s, port %s)", cfg.helper_bind, cfg.helper_port,
              cfg.stream_backend, cfg.stream_port)

@@ -155,3 +155,66 @@ def test_state_file_permissions(make_cfg):
     if os.name == "posix":
         assert stat.S_IMODE(cfg.devmode_token_file.stat().st_mode) == 0o600
         assert stat.S_IMODE(cfg.state_dir.stat().st_mode) == 0o700
+
+
+def alerting_world(cfg):
+    w = World(cfg)
+    w.sent = []
+    w.renewer.alert = w.sent.append
+    return w
+
+
+def test_alerts_on_failure_then_throttles_then_recovers(make_cfg):
+    w = alerting_world(make_cfg())
+    w.reset_reply = (200, json.dumps({"result": "fail", "errorCode": "ERR_006", "errorMsg": "Check sessionToken"}))
+    assert w.renewer.tick() == 1  # TV on: token read, extend ok, cloud reset refused
+    assert len(w.sent) == 1 and w.sent[0].startswith("🔴 <code>✕ tv.devmode</code> cloud reset: ")
+    w.hours(1)
+    w.renewer.tick()  # still failing (a failed reset is retried every tick), but within 12 h: quiet
+    assert len(w.sent) == 1
+    w.hours(12)
+    w.renewer.tick()  # 13 h after the first warning: warn again
+    assert len(w.sent) == 2
+    w.reset_reply = (200, OK)
+    w.hours(1)
+    assert w.renewer.tick() == 0
+    assert w.sent[-1].startswith("🟢 <code>✓ tv.devmode</code> renewed again · 999 h left")
+    w.hours(30)
+    w.renewer.tick()
+    assert len(w.sent) == 3  # and quiet again afterwards
+
+
+def test_alert_repeats_at_most_every_12_hours(make_cfg):
+    w = alerting_world(make_cfg())
+    w.ssh.token = None  # TV on but the token can't be read: an error on every tick
+    for _ in range(10):
+        w.renewer.tick()
+        w.hours(1)
+    assert len(w.sent) == 1
+    w.hours(3)
+    w.renewer.tick()
+    assert len(w.sent) == 2
+
+
+def test_alerts_when_time_runs_low(make_cfg):
+    w = alerting_world(make_cfg())
+    low = json.dumps({"result": "success", "errorCode": "200", "errorMsg": "80:00:00"})
+    w.get = lambda url: (w.urls.append(url), (200, OK) if "Reset" in url else (200, low))[1]
+    w.renewer.get = w.get
+    assert w.renewer.tick() == 0
+    assert w.sent == ["🔴 <code>✕ tv.devmode</code> only 80 h left · is renewal working?"]
+
+
+def test_no_alert_when_all_is_well(make_cfg):
+    w = alerting_world(make_cfg())
+    w.renewer.tick()
+    w.hours(30)
+    w.renewer.tick()
+    assert w.sent == []
+
+
+def test_boot_notice_only_right_after_a_boot():
+    from tvwake.notify import boot_notice
+
+    assert boot_notice(95) == "🟢 <code>✓ helper.up</code> L590 booted 1 min ago · agent started"
+    assert boot_notice(3600) is None

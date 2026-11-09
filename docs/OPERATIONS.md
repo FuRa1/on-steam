@@ -271,14 +271,27 @@ Everything runs **on the PC**, driven by events; nothing polls. The helper is ne
 | a Steam game starts during a stream | watcher in the start/resume worker: sleeps on `RegNotifyChangeKeyValue` (`HKCU\Software\Valve\Steam`, `RunningAppID`) and on the named event `Global\TvWakeStreamEnded` that the end hook sets; no timer | `game.start <name>` (no game.end, on purpose) |
 | stream over (pause or app closed), nothing restarts within 30 s | the pause / end hook | `pc.sleep`, then S3 sleep (TV on or off) |
 | same, but a Steam game is still running | waits `AUTOSLEEP_GAME_MIN` (15) instead of 30 s, then **forced shutdown** (`shutdown /s /f`): a game can't always be closed (elevated / anti-cheat), and many hang after S3 | `pc.off <name> left running, shutting down` |
-| boot / wake / shutdown | Task Scheduler `\TvWake\` (startup; Power-Troubleshooter 1; User32 1074) | `pc.on` / `pc.wake` (asleep since HH:MM) / `pc.off` |
+| boot | Task Scheduler `\TvWake\Boot` (startup + 30 s) | `pc.on cold boot · signed in after N s` (or "nobody signed in after 2 min"); `pc.crash` first if 6008 / Kernel-Power 41 since boot |
+| wake | `\TvWake\Wake` (Power-Troubleshooter 1) | `pc.wake asleep since HH:MM · by network (Wake-on-LAN)` / power button / keyboard or mouse |
+| shutdown | `\TvWake\Shutdown` (User32 1074) | `pc.off <type> · <Windows Update / Start menu, user / process, user>`; quiet when events.ps1 shut down itself |
+| Apollo service crashed | `\TvWake\ApolloCrash` (SCM 7031/7034; Windows 11 logs no plain 7036 stop events) | `apollo.down Apollo service crashed · restarted by Windows / still stopped` |
 | PC woken from the TV | the agent on the helper (`agent/tvwake/notify.py`) | `pc.ready` (in N s) / `pc.error` |
+| dev mode renewal fails or < 100 h left | `tvwake-devmode` timer on the helper | `tv.devmode <error> · N h left` (at most every 12 h), then once `renewed again` |
+| the helper booted | agent start within 10 min of boot | `helper.up L590 booted N min ago` |
+
+Details in stream messages: `stream.start/resume` carry the mode the client asked for (`4K 144 Hz`, from
+`APOLLO_CLIENT_*`) and `sleep/shutdown cancelled` when someone came back during the wait (the start/resume
+hook sets the named event `Global\TvWakeStreamBack`, which ends the wait at once). `stream.end` carries
+the length, `played <games>`, the codec and the number of encoder errors (Apollo log since the start).
+Messages from a test folder (`-Dir`) end in `(test)`.
 
 Message style ("Terminal + color"): `MARK <code>ICON key</code> details`, Telegram HTML. Marks: 🔵 stream
 running, ⚪ stopped, 🟣 PC power, 🟢 ok, 🔴 error. Telegram shows `<code>` as monospace only (no color);
 the marks carry the color. `events.ps1` is pure ASCII (symbols built from code points), so it works
 with or without a BOM.
 
+- **Always parse-check before installing** (`[System.Management.Automation.Language.Parser]::ParseFile`):
+  a script that does not parse makes the start hook fail, and Apollo then does not launch the app.
 - Install / update on the PC (elevated): `powershell -ExecutionPolicy Bypass -File pc\install-events.ps1`
   (settings from `.env`: `TELEGRAM_*`, `AUTOSLEEP` off|dry-run|on, `AUTOSLEEP_AFTER_MIN`, `AUTOSLEEP_GAME_MIN`).
   `-Uninstall` reverts everything. Log: `C:\ProgramData\tvwake\events.log`.

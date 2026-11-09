@@ -21,13 +21,30 @@ API = "https://api.telegram.org/bot{token}/sendMessage"
 
 # Color mark in front of each message (same scheme as pc/events.ps1): blue = stream running,
 # white = stream stopped, violet = PC power, green = ok, red = error.
-MARKS = {"pc.ready": "\U0001F7E2", "pc.error": "\U0001F534"}
+GREEN, RED = "\U0001F7E2", "\U0001F534"
+MARKS = {"pc.ready": GREEN, "pc.error": RED, "tv.devmode": RED, "helper.up": GREEN}
+BOOT_NOTICE_S = 600  # the agent says "L590 booted" only when it starts this soon after a boot
 
 
-def line(icon: str, key: str, detail: str = "") -> str:
+def line(icon: str, key: str, detail: str = "", mark: str | None = None) -> str:
     """A message in the bot's terminal style: MARK <code>ICON key</code> details (Telegram HTML)."""
-    mark = MARKS.get(key, "")
+    mark = MARKS.get(key, "") if mark is None else mark
     return f"{mark} <code>{icon} {key}</code> {html.escape(detail, quote=False)}".strip()
+
+
+def boot_notice(uptime_s: float) -> str | None:
+    """The helper.up message when the helper itself just booted (not on every agent restart)."""
+    if uptime_s >= BOOT_NOTICE_S:
+        return None
+    return line("✓", "helper.up", f"L590 booted {int(uptime_s // 60)} min ago · agent started")
+
+
+def system_uptime_s() -> float:
+    try:
+        with open("/proc/uptime", encoding="ascii") as f:
+            return float(f.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return float("inf")  # unknown: say nothing
 
 
 def enabled(cfg: Config) -> bool:

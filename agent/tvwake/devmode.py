@@ -35,13 +35,19 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable
 
+from . import notify
 from .config import Config, ConfigError, load_from_file
+from .notify import GREEN, line
 
 log = logging.getLogger("tvwake.devmode")
 
 TOKEN_PATH_ON_TV = "/var/luna/preferences/devmode_enabled"
 EXTEND_PAYLOAD = '{"id":"com.palmdts.devmode","params":{"extend":true}}'
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_\-]{16,256}$")
+
+
+LOW_REMAINING_H = 100  # warn when the session has less than this left
+ALERT_EVERY_H = 12  # repeat a dev mode warning at most this often
 
 
 class DevModeError(Exception):
@@ -226,12 +232,41 @@ class Renewer:
         get: Callable[[str], tuple[int, str]] = http_get,
         reachable: Callable[[], bool] | None = None,
         wall: Callable[[], float] = time.time,
+        alert: Callable[[str], object] | None = None,
     ) -> None:
         self.cfg = cfg
         self.ssh = ssh or TvSsh(cfg)
         self.get = get
         self.reachable = reachable or (lambda: bool(cfg.tv_ip) and tcp_reachable(cfg.tv_ip, cfg.tv_ssh_port))
         self.wall = wall
+        self.alert = alert  # Telegram (notify.send) or None
+
+    def _maybe_alert(self, st: dict, now: float, errors: list[str], done: list[str]) -> None:
+        """Telegram: renewal failing or time running low (at most every ALERT_EVERY_H), and once when fixed."""
+        if self.alert is None:
+            return
+        remaining = st.get("remaining_s")
+        left = f"{int(remaining // 3600)} h left" if remaining is not None else "time left unknown"  # floor: 999:33 is not 1000 h
+        problem = None
+        if errors:
+            problem = f"{'; '.join(errors)[:300]} · {left}"
+        elif remaining is not None and remaining < LOW_REMAINING_H * 3600:
+            problem = f"only {left} · is renewal working?"
+        if problem:
+            if self._older(st.get("last_alert_at"), ALERT_EVERY_H, now):
+                self._send(line("✕", "tv.devmode", problem))
+                st["last_alert_at"] = now
+            st["alert_active"] = True
+        elif st.get("alert_active") and done:
+            self._send(line("✓", "tv.devmode", f"renewed again · {left}", mark=GREEN))
+            st["alert_active"] = False
+            st.pop("last_alert_at", None)
+
+    def _send(self, text: str) -> None:
+        try:
+            self.alert(text)
+        except Exception:  # a notification must never break the renewal
+            log.exception("dev mode notification failed")
 
     def _older(self, ts: float | None, hours: float, now: float) -> bool:
         return ts is None or now - ts >= hours * 3600
@@ -306,6 +341,7 @@ class Renewer:
                 except DevModeError as e:
                     errors.append(f"check: {e}")
 
+            self._maybe_alert(st, now, errors, done)
             st["tv_was_up"] = tv_up
             st["last_tick_at"] = now
             if done or errors:
@@ -341,7 +377,8 @@ def main(argv: list[str] | None = None) -> int:
     if not cfg.tv_ip:
         log.error("TV_IP is not set")
         return 2
-    return Renewer(cfg).tick(force=args.command == "renew")
+    alert = (lambda text: notify.send(cfg, text)) if notify.enabled(cfg) else None
+    return Renewer(cfg, alert=alert).tick(force=args.command == "renew")
 
 
 if __name__ == "__main__":
