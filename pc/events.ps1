@@ -151,21 +151,35 @@ function Running-Game {
     if ($k) { [int]$k.GetValue('RunningAppID', 0) } else { 0 }
 }
 
-function Sleep-When-Idle([string]$why) {
+function Idle-Plan {
+    # What happens once a stream stopped, decided up front so the pause/end message can say it.
     # Many games do not survive S3 (the GPU is powered off; they hang or show black after waking), and
     # not every game can be closed from here (elevated or anti-cheat protected processes, non-Steam
     # games). So: no game -> sleep after 30 s. A game left running -> give it AUTOSLEEP_GAME_MIN for a
     # break, then shut the PC down (forced): the next start is a cold boot (~1 min) but always clean.
     $s = Settings
-    if ($s.autosleep -eq 'off') { return }
+    if ($s.autosleep -eq 'off') { return $null }
     $wait = [double]$s.autosleep_after_s + $SettleSeconds
     $game = Running-Game
+    $at = { param($sec) (Get-Date).AddSeconds($sec).ToString('HH:mm') }
     if ($game) {
         $wait = [math]::Max($wait, [double]$s.autosleep_game_s)
-        Log "game $game is running: waiting $wait s, then shutting down"
+        $text = "$(Steam-Game $game) still running$($Dot)shutdown at $(& $at $wait)"
+    } elseif ($wait -lt 120) {
+        $text = "sleep in $([int]$wait) s"
+    } else {
+        $text = "sleep at $(& $at $wait)"
     }
+    if ($s.autosleep -ne 'on') { $text += ' (test mode)' }
+    @{ wait = $wait; text = $text }
+}
+
+function Sleep-When-Idle([string]$why, $plan) {
+    if (-not $plan) { return }  # auto-sleep off
+    $s = Settings
+    Log "plan: $($plan.text)"
     $before = Stream-Starts
-    Start-Sleep -Seconds $wait
+    Start-Sleep -Seconds $plan.wait
     $after = Stream-Starts
     if ($after -ne $before) { Log "stream started again ($before -> $after): not sleeping"; return }
     $game = Running-Game
@@ -210,8 +224,16 @@ try {
     switch ($Kind) {
         'start'  { Send $Icon.start 'stream.start' $on; Watch-Games }
         'resume' { if ((Seconds-Since 'start') -gt 20) { Send $Icon.resume 'stream.resume' $on }; Watch-Games }  # skip the resume that comes with a start
-        'pause'  { Send $Icon.pause 'stream.pause' ((@('client disconnected', $App) | Where-Object { $_ }) -join $Dot); Sleep-When-Idle 'stream paused' }
-        'end'    { Send $Icon.end 'stream.end' ((@($App, (Duration (Seconds-Since 'start'))) | Where-Object { $_ }) -join $Dot); Sleep-When-Idle 'stream ended' }
+        'pause'  {
+            $plan = Idle-Plan
+            Send $Icon.pause 'stream.pause' ((@('client disconnected', $App, $plan.text) | Where-Object { $_ }) -join $Dot)
+            Sleep-When-Idle 'stream paused' $plan
+        }
+        'end'    {
+            $plan = Idle-Plan
+            Send $Icon.end 'stream.end' ((@($App, (Duration (Seconds-Since 'start')), $plan.text) | Where-Object { $_ }) -join $Dot)
+            Sleep-When-Idle 'stream ended' $plan
+        }
         'boot'   { Send $Icon.on 'pc.on' 'cold boot' }
         'wake'   {
             # Kernel-Power 42 ("entering sleep") has the right time; 107 ("resumed") does not.
