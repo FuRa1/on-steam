@@ -93,6 +93,9 @@ class Config:
     devmode_check_interval_h: float
     state_dir: Path
     log_level: str
+    # notifications
+    telegram_bot_token: str
+    telegram_chat_id: str
     raw: dict[str, str] = field(repr=False, default_factory=dict)
 
     @property
@@ -221,6 +224,8 @@ def load_config(env: dict[str, str]) -> Config:
         devmode_check_interval_h=_num(env, "DEVMODE_CHECK_INTERVAL_H", "6"),
         state_dir=_expand(_get(env, "STATE_DIR", "~/.local/state/tvwake")),
         log_level=_get(env, "LOG_LEVEL", "INFO").upper(),
+        telegram_bot_token=_get(env, "TELEGRAM_BOT_TOKEN", ""),
+        telegram_chat_id=_get(env, "TELEGRAM_CHAT_ID", ""),
         raw=dict(env),
     )
 
@@ -239,5 +244,5 @@ KNOWN_KEYS = frozenset(
     QUIET_PERIOD_S POLL_INTERVAL_S BOOT_TIMEOUT_S STREAM_TIMEOUT_S MOCK_PC MOCK_BOOT_S
     MOCK_STREAM_S MOCK_FAIL MOCK_INITIALLY_ON MOCK_AUTO_OFF_S TV_IP TV_SSH_PORT TV_SSH_USER TV_SSH_KEY
     DEVMODE_RENEW_URL DEVMODE_CHECK_URL DEVMODE_RENEW_INTERVAL_H DEVMODE_EXTEND_INTERVAL_H
-    DEVMODE_CHECK_INTERVAL_H STATE_DIR LOG_LEVEL""".split()
+    DEVMODE_CHECK_INTERVAL_H STATE_DIR LOG_LEVEL TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID""".split()
 )

@@ -247,10 +247,11 @@ Open:
 - [ ] **Steam does not start after auto-login** (cause found 2026-11-09): all HKCU Run entries are
       disabled in `StartupApproved` (see §6). Enable Steam in Task Manager → Startup apps, or add a
       logon task. Until then the agent's "ready" (Apollo port) comes before Steam.
-- [ ] **PC left on after the TV is switched off.** Idea: Windows sleep timer (now `STANDBYIDLE = 0`,
-      never) of 15–20 min, if Apollo keeps the PC awake during a stream (check `powercfg /requests`
-      while streaming); otherwise a small watcher that sleeps the PC 5 min after `CLIENT DISCONNECTED`
-      without a new session. Sleep rather than shutdown: WoL from S3 works and the session survives.
+- [x] **PC left on after the TV is switched off** (2026-11-09): `pc/events.ps1`, see §9. Verified by
+      hand: TV off → paused session → PC sleeps → "PC Game" → WoL wakes it in ~1.5 s, agent ready
+      9 s after the button, Moonlight **resumes the same game**.
+      Windows' own sleep timer can't do it: a game holds `USB Audio Device` / `Legacy Kernel Caller`
+      power requests even while paused.
 - [ ] Agent readiness: Apollo's port opens at the login screen, before Steam. Optionally also wait for
       Steam (port 27036) before launching Moonlight.
 - [ ] **Direct start into Big Picture**: needs the numeric app ID from Moonlight's app info
@@ -258,3 +259,32 @@ Open:
       `STREAM_APP_PARAMS='{"host_uuid":"A4ED6DC5-4E97-DA21-C08C-416F2459E2BF","host_app_id":<ID>}'`
       and `scripts/deploy.sh tv`.
 - [ ] Controller: none yet. Connect it to the **TV** (Bluetooth/USB); ViGEmBus on the PC is installed.
+
+## 9. PC events: Telegram + sleep when the TV is off (2026-11-09)
+
+Everything runs **on the PC**, driven by events; nothing polls. The helper is never put to sleep.
+
+| Event | Fired by | Telegram |
+|---|---|---|
+| app started / closed | Apollo `global_prep_cmd` do / undo | ▶️ started / ⏹ finished |
+| first client connected / all disconnected | Apollo `global_state_cmd` do / undo | ▶️ resumed / ⏸ paused |
+| paused + TV off | the pause hook (TV checked twice: ping, ports 3001/9922) | 😴, then S3 sleep |
+| boot / wake / shutdown | Task Scheduler `\TvWake\` (startup; Power-Troubleshooter 1; User32 1074) | 💻 / ☀️ (with the time it fell asleep) / ⏻ |
+| PC woken from the TV | the agent on the helper (`agent/tvwake/notify.py`) | 💡 ready in N s / ❌ |
+
+- Install / update on the PC (elevated): `powershell -ExecutionPolicy Bypass -File pc\install-events.ps1`
+  (settings from `.env`: `TELEGRAM_*`, `TV_IP`, `AUTOSLEEP` off|dry-run|on, `AUTOSLEEP_AFTER_MIN`).
+  `-Uninstall` reverts everything. Log: `C:\ProgramData\tvwake\events.log`.
+- Sleep only happens in the pause hook, so a PC woken by hand is never put back to sleep (the earlier
+  polling version did exactly that: it trusted the wake time, see below).
+- Apollo waits for its hook commands, so the hook starts a detached copy through **WMI**
+  (`Win32_Process.Create`). Processes started by a short-lived parent otherwise die with it: a sleep
+  started with `Start-Process` from an ssh session never happened.
+- **Kernel-Power 107 ("resumed from sleep") is stamped with the time the PC went to sleep**, not the
+  wake time. The real wake time is Power-Troubleshooter 1.
+- `events.ps1` is installed with a UTF-8 BOM: Windows PowerShell reads a .ps1 without one in the ANSI
+  code page, which breaks the Cyrillic/emoji messages.
+- The Telegram bot is the one Uptime Kuma uses (helper, http://akeya-thinkpad-l590:3001 → Settings →
+  Notifications). The token is in `.env` on the MacBook (`env`), the helper and the PC; never commit it.
+- `QUIET_PERIOD_S=0`: the agent starts checking right after WoL (a sleeping PC answers in seconds).
+

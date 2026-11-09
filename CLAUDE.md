@@ -59,4 +59,6 @@ Hobby project: press "PC Game" on an LG TV → the helper (ThinkPad L590, Ubuntu
 `agent/tvwake/`: `config.py` (.env parser + validation), `auth.py` (HMAC + replay cache), `wake.py`
 (state machine, `Clock` injected; tests use `FakeClock`), `probes.py`/`wol.py`/`mock.py`, `api.py`
 (FastAPI, CORS for `Origin: null`), `devmode.py` (timer tick), `tvpower.py`, `client.py`.
+`notify.py` (Telegram, optional). `pc/events.ps1` (+ `install-events.ps1`): Apollo hooks + power events →
+Telegram, and the PC sleeps itself when a stream is paused and the TV is off (OPERATIONS §9).
 `tv-app/js/app.js` is the UI controller (generation counter cancels stale flows; global error handlers).

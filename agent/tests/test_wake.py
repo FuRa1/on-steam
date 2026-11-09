@@ -170,3 +170,31 @@ def test_mock_pc_auto_off(make_cfg):
     assert asyncio.run(pc.ping("x"))
     clock.advance(61)
     assert not asyncio.run(pc.ping("x"))
+
+
+def run_job_notify(cfg, pc, clock):
+    sent = []
+
+    async def go():
+        mgr = WakeManager(cfg, pc, clock, notify=sent.append)
+        job = mgr.start_or_join()
+        await job.task
+        return job
+
+    return asyncio.run(go()), sent
+
+
+def test_notifies_only_when_the_pc_was_woken(make_cfg):
+    clock = FakeClock()
+    _, sent = run_job_notify(make_cfg(), FakePC(clock, ping_at=0, stream_at=0), clock)
+    assert sent == []  # already on: no message
+    clock = FakeClock()
+    _, sent = run_job_notify(make_cfg(QUIET_PERIOD_S=0), FakePC(clock, ping_at=6, stream_at=8), clock)
+    assert len(sent) == 1 and sent[0].startswith("💡") and "готов за" in sent[0]
+
+
+def test_notifies_failures(make_cfg):
+    clock = FakeClock()
+    job, sent = run_job_notify(make_cfg(), FakePC(clock), clock)
+    assert job.state == "failed"
+    assert len(sent) == 1 and sent[0].startswith("❌")

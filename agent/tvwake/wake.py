@@ -19,6 +19,7 @@ import logging
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from typing import Callable
 
 from .clock import Clock
 from .config import Config
@@ -82,10 +83,13 @@ class Job:
 
 
 class WakeManager:
-    def __init__(self, cfg: Config, probes: Probes, clock: Clock) -> None:
+    def __init__(
+        self, cfg: Config, probes: Probes, clock: Clock, notify: Callable[[str], object] | None = None
+    ) -> None:
         self.cfg = cfg
         self.probes = probes
         self.clock = clock
+        self.notify = notify  # blocking; called in a worker thread
         self._jobs: OrderedDict[str, Job] = OrderedDict()
         self._current: Job | None = None
 
@@ -118,6 +122,23 @@ class WakeManager:
             log.exception("wake job %s crashed", job.id)
             self._fail(job, f"Internal error in the helper: {e.__class__.__name__}: {e}")
         log.info("wake job %s finished: %s %s", job.id, job.state, job.error)
+        await self._report(job)
+
+    async def _report(self, job: Job) -> None:
+        """Tell the user (Telegram) when the PC had to be woken, or when the flow failed."""
+        if self.notify is None:
+            return
+        took = (job.finished_at or self.now()) - job.created_at
+        if job.state == JOB_FAILED:
+            text = f"❌ Не удалось подготовить ПК ({took:.0f} с): {job.error}"
+        elif job.stage("wake").state == OK:
+            text = f"💡 ПК разбудили с ТВ, готов за {took:.0f} с"
+        else:
+            return  # the PC was already on: nothing worth a message
+        try:
+            await asyncio.to_thread(self.notify, text)
+        except Exception:  # a notification must never break the job
+            log.exception("notification failed")
 
     # ---- the flow ---------------------------------------------------------
 

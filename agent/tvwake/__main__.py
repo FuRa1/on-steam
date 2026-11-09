@@ -13,6 +13,7 @@ from .clock import Clock
 from .config import ConfigError, load_from_file
 from .mock import MockPC
 from .probes import RealProbes
+from . import notify
 from .wake import WakeManager
 
 
@@ -38,7 +39,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         probes = RealProbes(cfg.pc_mac, cfg.wol_broadcast, cfg.wol_ports)
 
-    manager = WakeManager(cfg, probes, clock)
+    notifier = None
+    if notify.enabled(cfg) and not cfg.mock_pc:
+        notifier = lambda text: notify.send(cfg, text)  # noqa: E731
+    manager = WakeManager(cfg, probes, clock, notifier)
     app = create_app(cfg, manager)
     log.info("listening on %s:%s (backend %s, port %s)", cfg.helper_bind, cfg.helper_port,
              cfg.stream_backend, cfg.stream_port)
