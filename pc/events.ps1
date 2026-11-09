@@ -283,6 +283,7 @@ function Take-Back([string]$how) {
     # the restart costs a few seconds and nothing else.
     $plan = $null
     try { $plan = Get-Content "$Dir\plan" -Raw -ErrorAction Stop | ConvertFrom-Json } catch {}
+    if ($plan -and (Get-Date) -gt [datetime]$plan.until) { $plan = $null }  # left over (e.g. the PC was switched off)
     Mark 'localuser'  # the end hook that follows the restart must not plan a new sleep
     Remove-Item "$Dir\plan" -ErrorAction SilentlyContinue
     Signal 'LocalUser'
