@@ -52,7 +52,7 @@ $Icon = @{
 $Dot = " $(U 0xB7) "  # " . " middle dot between details
 $Live = U 0x1F535; $Idle = U 0x26AA, 0xFE0F; $Power = U 0x1F7E3; $Good = U 0x1F7E2   # blue, white, violet, green
 $Mark = @{
-    'stream.start' = $Live; 'stream.resume' = $Live; 'stream.pause' = $Idle; 'stream.end' = $Idle; 'game.start' = $Live; 'game.end' = $Idle
+    'stream.start' = $Live; 'stream.resume' = $Live; 'stream.pause' = $Idle; 'stream.end' = $Idle; 'game.start' = $Live
     'pc.sleep' = $Power; 'pc.wake' = $Power; 'pc.on' = $Power; 'pc.off' = $Power; 'events.ok' = $Good
 }
 function Html([string]$x) { $x.Replace('&', '&amp;').Replace('<', '&lt;').Replace('>', '&gt;') }
@@ -151,27 +151,18 @@ function Running-Game {
     if ($k) { [int]$k.GetValue('RunningAppID', 0) } else { 0 }
 }
 
-function Close-Game {
-    # Every process started from a Steam library's game folder (works for any library drive).
-    $procs = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -match '\\steamapps\\common\\' })
-    foreach ($p in $procs) {
-        Log "closing $($p.Name) ($($p.ProcessId)): $($p.ExecutablePath)"
-        Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
-    }
-    $procs.Count
-}
-
 function Sleep-When-Idle([string]$why) {
-    # Many games do not survive S3 (the GPU is powered off; they hang or show black after waking).
-    # So: no game -> sleep after 30 s. A game left running -> give it AUTOSLEEP_GAME_MIN for a break,
-    # then close it and sleep, so the next stream starts clean instead of on a frozen game.
+    # Many games do not survive S3 (the GPU is powered off; they hang or show black after waking), and
+    # not every game can be closed from here (elevated or anti-cheat protected processes, non-Steam
+    # games). So: no game -> sleep after 30 s. A game left running -> give it AUTOSLEEP_GAME_MIN for a
+    # break, then shut the PC down (forced): the next start is a cold boot (~1 min) but always clean.
     $s = Settings
     if ($s.autosleep -eq 'off') { return }
     $wait = [double]$s.autosleep_after_s + $SettleSeconds
     $game = Running-Game
     if ($game) {
         $wait = [math]::Max($wait, [double]$s.autosleep_game_s)
-        Log "game $game is running: waiting $wait s before closing it and sleeping"
+        Log "game $game is running: waiting $wait s, then shutting down"
     }
     $before = Stream-Starts
     Start-Sleep -Seconds $wait
@@ -181,12 +172,12 @@ function Sleep-When-Idle([string]$why) {
     $test = $s.autosleep -ne 'on'
     if ($game) {
         $name = Steam-Game $game
-        if ($test) { Send $Icon.end 'game.end' "$name$($Dot)test mode, would close it" }
-        else {
-            $n = Close-Game
-            Send $Icon.end 'game.end' "$name$($Dot)closed before sleep ($n process$(if ($n -ne 1) { 'es' }))"
-            Start-Sleep -Seconds 3
-        }
+        if ($test) { Send $Icon.off 'pc.off' "$name left running$($Dot)test mode, would shut down"; return }
+        Send $Icon.off 'pc.off' "$name left running, shutting down"
+        Mark 'selfoff'  # the Shutdown task stays quiet: this message already said it
+        Log 'shutting down'
+        & shutdown.exe /s /f /t 0 /c "tv-wake: $name was left running after the stream"
+        return
     }
     if ($test) { Send $Icon.sleep 'pc.sleep' "$why$($Dot)test mode, staying on"; return }
     Send $Icon.sleep 'pc.sleep' "$why, going to sleep"
@@ -227,7 +218,7 @@ try {
             $slept = Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-Power'; Id = 42 } -MaxEvents 1 -ErrorAction SilentlyContinue
             Send $Icon.wake 'pc.wake' $(if ($slept) { "asleep since $($slept.TimeCreated.ToString('HH:mm'))" } else { '' })
         }
-        'shutdown' { Send $Icon.off 'pc.off' 'shutdown or restart' }
+        'shutdown' { if ((Seconds-Since 'selfoff') -gt 120) { Send $Icon.off 'pc.off' 'shutdown or restart' } }
         'test'     { $s = Settings; Send $Icon.ok 'events.ok' "auto-sleep: $($s.autosleep)" }
         default  { Log "unknown event" }
     }

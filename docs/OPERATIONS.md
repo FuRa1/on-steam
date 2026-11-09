@@ -270,7 +270,7 @@ Everything runs **on the PC**, driven by events; nothing polls. The helper is ne
 | first client connected / all disconnected | Apollo `global_state_cmd` do / undo | `stream.resume` / `stream.pause` |
 | a Steam game starts during a stream | watcher in the start/resume worker: sleeps on `RegNotifyChangeKeyValue` (`HKCU\Software\Valve\Steam`, `RunningAppID`) and on the named event `Global\TvWakeStreamEnded` that the end hook sets; no timer | `game.start <name>` (no game.end, on purpose) |
 | stream over (pause or app closed), nothing restarts within 30 s | the pause / end hook | `pc.sleep`, then S3 sleep (TV on or off) |
-| same, but a Steam game is still running | waits `AUTOSLEEP_GAME_MIN` (15) instead of 30 s, then closes every `steamapps\common` process | `game.end <name> · closed before sleep`, then `pc.sleep` |
+| same, but a Steam game is still running | waits `AUTOSLEEP_GAME_MIN` (15) instead of 30 s, then **forced shutdown** (`shutdown /s /f`): a game can't always be closed (elevated / anti-cheat), and many hang after S3 | `pc.off <name> left running, shutting down` |
 | boot / wake / shutdown | Task Scheduler `\TvWake\` (startup; Power-Troubleshooter 1; User32 1074) | `pc.on` / `pc.wake` (asleep since HH:MM) / `pc.off` |
 | PC woken from the TV | the agent on the helper (`agent/tvwake/notify.py`) | `pc.ready` (in N s) / `pc.error` |
 
@@ -290,7 +290,8 @@ with or without a BOM.
 - **Games and S3** (seen 2026-11-09 with INSIDE): after waking, a game left running can hang (0 % CPU,
   black picture on the TV and the monitor) because the GPU was powered off and the game does not
   rebuild its device; exclusive fullscreen on Apollo's virtual display makes it worse. Big Picture
-  itself survives. Hence the game timeout above. Borderless/windowed fullscreen in a game's settings
+  itself survives. Hence the game timeout and shutdown above. Non-Steam games are not detected (the
+  PC sleeps as if no game ran). Borderless/windowed fullscreen in a game's settings
   makes it more likely to survive a short sleep.
 - Apollo waits for its hook commands, so the hook starts a detached copy through **WMI**
   (`Win32_Process.Create`). Processes started by a short-lived parent otherwise die with it: a sleep
