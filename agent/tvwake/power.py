@@ -26,12 +26,15 @@ class PowerError(Exception):
 
 
 async def pc_is_up(cfg: Config, probes: Probes) -> bool:
-    return await probes.ping(cfg.pc_ip)
+    """Same test as the wake flow: ping OR the streaming port. Windows may drop ping (its firewall
+    blocks ICMP on a "Public" network), while Apollo still answers on its port."""
+    results = await asyncio.gather(probes.ping(cfg.pc_ip), probes.tcp_open(cfg.pc_ip, cfg.stream_port))
+    return any(results)
 
 
 async def shutdown(cfg: Config, probes: Probes) -> str:
     """Ask the PC to shut down. Returns "off" (it was off already) or "sent"; raises PowerError."""
-    if not await probes.ping(cfg.pc_ip):
+    if not await pc_is_up(cfg, probes):
         return "off"
     if cfg.mock_pc:
         probes.power_off()  # type: ignore[attr-defined]

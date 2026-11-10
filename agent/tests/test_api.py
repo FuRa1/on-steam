@@ -114,3 +114,21 @@ def test_shutdown_needs_pc_ssh(make_cfg):
     r = c.post("/shutdown", headers=headers("POST", "/shutdown"))
     assert r.status_code == 502
     assert "PC_SSH" in r.json()["detail"]["error"]
+
+
+def test_pc_up_when_ping_is_blocked(make_cfg):
+    # Windows firewall drops ping, Apollo's port still answers: the PC is on.
+    class NoPing:
+        async def ping(self, ip):
+            return False
+
+        async def tcp_open(self, ip, port):
+            return True
+
+        async def send_wol(self):
+            pass
+
+    cfg = make_cfg()
+    clock = Clock()
+    c = TestClient(create_app(cfg, WakeManager(cfg, NoPing(), clock)))
+    assert c.get("/pc", headers=headers("GET", "/pc")).json() == {"up": True}
