@@ -393,3 +393,6 @@ mode 600, never in git); the bot token is read from `~/tv-wake-launcher/.env`. L
 
 `IPWATCH_DNS_HOST=moralmachine.duckdns.org`: the 5-hourly check also resolves the name and sends
 `dns.stale` (once per address) if it doesn't point at the current IP, i.e. the updater is broken.
+- The "is the PC on" check is ping **or** the Apollo port (like the wake flow). 2026-11-10 the PC's
+  Ethernet came up as a new network "Network 3" with profile **Public** (Windows drops ping there);
+  set back to Private: `Set-NetConnectionProfile -InterfaceAlias Ethernet -NetworkCategory Private`.
