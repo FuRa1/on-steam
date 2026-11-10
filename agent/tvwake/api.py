@@ -5,7 +5,8 @@ POST /wake            start or join the wake job: {job_id}
 GET  /jobs/{job_id}   job state
 GET  /devmode         dev mode session info from the renewal state file
 GET  /pc              {up}: does the PC answer ping (the "PC Off" app waits for false)
-POST /shutdown        shut the PC down now: {state: "sent" | "off"} ("off" = it was off already)
+POST /shutdown        shut the PC down now: {state: "sent" | "off"} ("off" = it was off already);
+                      after "sent" the agent waits for the PC to go quiet and shows a toast on the TV
 
 The TV app runs from a file:// origin (Origin: null) and sends custom headers, so the
 browser does a CORS preflight. We allow any origin: authentication is the HMAC signature,
@@ -14,7 +15,9 @@ not the origin.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,8 +31,10 @@ from .wake import WakeManager
 log = logging.getLogger(__name__)
 
 
-def create_app(cfg: Config, manager: WakeManager) -> FastAPI:
+def create_app(cfg: Config, manager: WakeManager,
+               tv_toast: Callable[[str], Awaitable[object]] | None = None) -> FastAPI:
     app = FastAPI(title="tv-wake-launcher agent", version=__version__, docs_url=None, redoc_url=None)
+    background: set[asyncio.Task] = set()  # keep references, or the tasks may be collected
     verifier = Verifier(cfg.shared_secret, wall=manager.clock.wall)
 
     app.add_middleware(
@@ -92,6 +97,10 @@ def create_app(cfg: Config, manager: WakeManager) -> FastAPI:
             state = await power.shutdown(cfg, manager.probes)
         except power.PowerError as e:
             raise HTTPException(502, detail={"error": str(e)}) from None
+        if state == "sent" and tv_toast is not None:
+            task = asyncio.create_task(power.report_when_off(cfg, manager.probes, tv_toast))
+            background.add(task)
+            task.add_done_callback(background.discard)
         return {"state": state}
 
     @app.get("/devmode", dependencies=[Depends(require_auth)])

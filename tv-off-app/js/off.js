@@ -1,6 +1,6 @@
 /*
- * "PC Off" app: asks for confirmation, then has the helper shut the PC down (POST /shutdown)
- * and waits until the PC stops answering (GET /pc).
+ * "PC Off" app: asks for confirmation, then has the helper shut the PC down (POST /shutdown) and
+ * closes. The helper waits for the PC to go quiet and shows a TV notification "<PC> is off".
  *
  * Confirmation: the TV's own system popup (com.webos.notification/createAlert) when the TV allows
  * it; its "Turn off" button relaunches this app with {action: "shutdown"}. The same two buttons are
@@ -15,9 +15,7 @@
   };
 
   var KEY = { LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40, ENTER: 13, BACK: 461, ESC: 27 };
-  var POLL_MS = 2000;
-  var OFF_WAIT_S = 180;   // a forced shutdown takes ~10-60 s
-  var CLOSE_AFTER_MS = 4000;
+  var CLOSE_AFTER_MS = 3000;
 
   var cfg = window.TW_CONFIG;
   var api = null;
@@ -27,7 +25,6 @@
 
   function $(id) { return document.getElementById(id); }
   function pcName() { return cfg.pcName || "the PC"; }
-  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
   function setBanner(text, kind) {
     var b = $("banner");
@@ -131,44 +128,18 @@
     showError("");
     showButtons(["exit"]);
     setBanner("Turning off " + pcName() + "…");
-    var t0 = Date.now();
+    // The helper only has to get the command to the PC (a few seconds). Windows then needs 30-60 s;
+    // the helper watches that and shows a TV notification when the PC is really off.
     api.request("POST", "/shutdown", { timeoutMs: 35000 }).then(function (r) {
       if (gen !== st.gen) return;
-      if (r.state === "off") return true;
-      return waitOff(gen, t0);
-    }).then(function (off) {
-      if (gen !== st.gen) return;
-      if (off) {
-        st.phase = "done";
-        setBanner(pcName() + " is off.", "good");
-        showButtons(["exit"]);
-        closeSoon();
-      } else {
-        fail(pcName() + " still answers after " + OFF_WAIT_S + " s. It may be installing updates; " +
-          "check its screen, or hold the power button.");
-      }
+      st.phase = "done";
+      setBanner(r.state === "off" ? pcName() + " is already off." :
+        pcName() + " is shutting down. The TV will show a notification when it is off.", "good");
+      showButtons(["exit"]);
+      closeSoon();
     }, function (e) {
       if (gen === st.gen) fail(e.message || String(e));
     });
-  }
-
-  function waitOff(gen, t0) {
-    var errors = 0;
-    function loop() {
-      if (gen !== st.gen) return Promise.resolve(false);
-      if (Date.now() - t0 > OFF_WAIT_S * 1000) return Promise.resolve(false);
-      setBanner("Turning off " + pcName() + "… " + Math.round((Date.now() - t0) / 1000) + " s");
-      return sleep(POLL_MS).then(function () {
-        return api.request("GET", "/pc");
-      }).then(function (r) {
-        errors = 0;
-        return r.up ? loop() : true;
-      }, function (e) {
-        if (++errors >= 5) throw e;
-        return loop();
-      });
-    }
-    return loop();
   }
 
   function launchAction() {

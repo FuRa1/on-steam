@@ -11,12 +11,16 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from collections.abc import Awaitable, Callable
+
 from .config import Config
 from .probes import Probes
 
 log = logging.getLogger(__name__)
 
 SSH_TIMEOUT_S = 25
+OFF_POLL_S = 2
+OFF_WAIT_S = 180  # a forced shutdown takes ~30-60 s
 # Runs in the PC's default ssh shell (cmd or PowerShell: both take this as is).
 COMMAND = 'shutdown /s /f /t 0 /c "PC Off on the TV"'
 
@@ -63,3 +67,18 @@ async def shutdown(cfg: Config, probes: Probes) -> str:
         log.warning("shutdown over ssh failed: %s", reason)
         raise PowerError(reason)
     return "sent"
+
+
+async def report_when_off(cfg: Config, probes: Probes, toast: Callable[[str], Awaitable[object]]) -> None:
+    """After "sent": wait until the PC stops answering, then tell the TV (the app has closed)."""
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+    while loop.time() - t0 < OFF_WAIT_S:
+        await asyncio.sleep(OFF_POLL_S)
+        if not await pc_is_up(cfg, probes):
+            secs = int(loop.time() - t0)
+            log.info("the PC is off after %d s", secs)
+            await toast(f"{cfg.pc_name} is off ({secs} s)")
+            return
+    log.warning("the PC still answers %d s after the shutdown", OFF_WAIT_S)
+    await toast(f"{cfg.pc_name} is still on after {OFF_WAIT_S // 60} min. Updates? Check its screen.")

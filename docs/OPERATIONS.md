@@ -353,9 +353,11 @@ but has its own build; `tv-app/` and its IPK are not touched.
   its "Turn off" button relaunches the app with `{action: "shutdown"}`. If the TV refuses the popup,
   the on-screen buttons are the confirmation.
 - Turn off → `POST /shutdown` → the agent runs `ssh $PC_SSH shutdown /s /f /t 0` (the helper's admin key
-  on the PC, alias `moralme`), then the app polls `GET /pc` until the PC stops answering ("MoralMe is
-  off", closes after 4 s). Forced on purpose: the button is for when something hangs. Telegram:
-  `pc.off` from the PC's Shutdown task.
+  on the PC, alias `moralme`) and answers as soon as the PC took the command; the app says "shutting
+  down" and closes after 3 s. Forced on purpose: the button is for when something hangs.
+- Windows then needs ~30-60 s (it answers ping almost to the end). The agent polls (ping or Apollo
+  port, every 2 s) and shows a **TV system toast** via SSAP (`tvpower.toast`, the stored client key):
+  "MoralMe is off (N s)", or "still on after 3 min" (updates?). Telegram: `pc.off` from the PC.
 - Back exits at any time; a shutdown already sent goes on.
 
 

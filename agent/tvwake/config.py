@@ -95,6 +95,7 @@ class Config:
     log_level: str
     # "PC Off" on the TV: ssh host alias (or user@host) of the PC, empty = disabled
     pc_ssh: str
+    pc_name: str  # how messages name the PC ("MoralMe")
     # notifications
     telegram_bot_token: str
     telegram_chat_id: str
@@ -233,6 +234,7 @@ def load_config(env: dict[str, str]) -> Config:
         state_dir=_expand(_get(env, "STATE_DIR", "~/.local/state/tvwake")),
         log_level=_get(env, "LOG_LEVEL", "INFO").upper(),
         pc_ssh=_get(env, "PC_SSH", ""),
+        pc_name=_get(env, "PC_NAME", "The PC"),
         telegram_bot_token=_get(env, "TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=_get(env, "TELEGRAM_CHAT_ID", ""),
         ipwatch_dns_host=_get(env, "IPWATCH_DNS_HOST", ""),
@@ -254,6 +256,6 @@ KNOWN_KEYS = frozenset(
     QUIET_PERIOD_S POLL_INTERVAL_S BOOT_TIMEOUT_S STREAM_TIMEOUT_S MOCK_PC MOCK_BOOT_S
     MOCK_STREAM_S MOCK_FAIL MOCK_INITIALLY_ON MOCK_AUTO_OFF_S TV_IP TV_SSH_PORT TV_SSH_USER TV_SSH_KEY
     DEVMODE_RENEW_URL DEVMODE_CHECK_URL DEVMODE_RENEW_INTERVAL_H DEVMODE_EXTEND_INTERVAL_H
-    DEVMODE_CHECK_INTERVAL_H STATE_DIR LOG_LEVEL PC_SSH TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
+    DEVMODE_CHECK_INTERVAL_H STATE_DIR LOG_LEVEL PC_SSH PC_NAME TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
     IPWATCH_DNS_HOST IPWATCH_EVERY_H""".split()
 )

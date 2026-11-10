@@ -13,7 +13,7 @@ from .clock import Clock
 from .config import ConfigError, load_from_file
 from .mock import MockPC
 from .probes import RealProbes
-from . import notify
+from . import notify, tvpower
 from .wake import WakeManager
 
 
@@ -47,7 +47,10 @@ def main(argv: list[str] | None = None) -> int:
         text = notify.boot_notice(notify.system_uptime_s())
         if text:
             notifier(text)
-    app = create_app(cfg, manager)
+    tv_toast = None
+    if cfg.tv_ip and not cfg.mock_pc:
+        tv_toast = lambda text: tvpower.toast(cfg, text)  # noqa: E731
+    app = create_app(cfg, manager, tv_toast)
     log.info("listening on %s:%s (backend %s, port %s)", cfg.helper_bind, cfg.helper_port,
              cfg.stream_backend, cfg.stream_port)
     # log_config=None keeps our logging format (journald adds timestamps).

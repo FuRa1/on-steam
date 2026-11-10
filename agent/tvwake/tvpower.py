@@ -47,6 +47,31 @@ async def _run(cfg, action: str) -> int:
     return 0
 
 
+async def toast(cfg, text: str) -> bool:
+    """Show a system toast on the TV (the agent's "PC is off" note). Needs the stored client key
+    (scripts/tv-off.sh paired once); never prompts, never raises."""
+    key_file = cfg.state_dir / "tv_client_key"
+    if not cfg.tv_ip or not key_file.exists():
+        return False
+    try:
+        from aiowebostv import WebOsClient
+    except ImportError:
+        return False
+    client = WebOsClient(cfg.tv_ip, client_key=key_file.read_text().strip())
+    try:
+        await asyncio.wait_for(client.connect(), timeout=10)
+        await asyncio.wait_for(client.send_message(text), timeout=10)
+        return True
+    except Exception as e:  # noqa: BLE001 - the TV may be off; a toast is never worth an error
+        print(f"TV toast failed: {e!r}", file=sys.stderr)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m tvwake.tvpower")
     p.add_argument("--env")
