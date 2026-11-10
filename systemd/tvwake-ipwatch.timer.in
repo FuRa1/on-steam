@@ -1,0 +1,11 @@
+[Unit]
+Description=tv-wake-launcher: public IP check every @IPWATCH_H@ hours
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=@IPWATCH_H@h
+AccuracySec=1min
+Unit=tvwake-ipwatch.service
+
+[Install]
+WantedBy=timers.target

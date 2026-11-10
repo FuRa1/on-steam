@@ -1,0 +1,11 @@
+[Unit]
+Description=tv-wake-launcher: check the public IP, Telegram on change
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@/agent
+ExecStart=@PYTHON@ -m tvwake.ipwatch --env @ENV_FILE@ check
+Environment=PYTHONUNBUFFERED=1
+TimeoutStartSec=120
+@USER_LINE@

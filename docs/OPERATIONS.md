@@ -53,6 +53,7 @@ journalctl --user -u tvwake-agent -f            # live log (wake jobs, rejected 
 systemctl --user restart tvwake-agent
 systemctl --user list-timers tvwake-devmode.timer
 journalctl --user -u tvwake-devmode -n 50       # dev mode renewal runs
+journalctl --user -u tvwake-ipwatch -n 20       # public IP checks (every 5 h, §11)
 scripts/agent-cli.sh health | wake | devmode    # talk to the agent like the TV does
 ```
 Units are **user units** (`~/.config/systemd/user/`), linger is on (`loginctl show-user akeya -P Linger` → yes),
@@ -294,6 +295,7 @@ Everything runs **on the PC**, driven by events; nothing polls. The helper is ne
 | PC woken from the TV | the agent on the helper (`agent/tvwake/notify.py`) | `pc.ready` (in N s) / `pc.error` |
 | dev mode renewal fails or < 100 h left | `tvwake-devmode` timer on the helper | `tv.devmode <error> · N h left` (at most every 12 h), then once `renewed again` |
 | the helper booted | agent start within 10 min of boot | `helper.up L590 booted N min ago` |
+| home public IP changed | `tvwake-ipwatch` timer on the helper (every 5 h, §11) | `ip.changed <old> → <new> · the old one held N d N h`; first run `ip.public`; with `IPWATCH_DNS_HOST`: `dns.stale` / `dns.ok` |
 
 Details in stream messages: `stream.start/resume` carry the mode the client asked for (`4K 144 Hz`, from
 `APOLLO_CLIENT_*`) and `sleep/shutdown cancelled` when someone came back during the wait (the start/resume
@@ -355,3 +357,34 @@ but has its own build; `tv-app/` and its IPK are not touched.
   off", closes after 4 s). Forced on purpose: the button is for when something hangs. Telegram:
   `pc.off` from the PC's Shutdown task.
 - Back exits at any time; a shutdown already sent goes on.
+
+
+## 11. Public IP watch (2026-11-10)
+
+Since 2026-11-10 the internet is **UZO** (MEO's brand, router MEO FiberGateway GR241AG). The public
+IPv4 is dynamic (MEO-BROADBAND "Dynamic Address Range"), **no CGNAT** (UPnP on the router reports
+the public address). UZO has no SAPO DynIP, so `moralmachine.dynip.sapo.pt` is stale (still points to
+`37.189.69.85`) and is not used.
+
+Known history (from tailscaled logs on the helper):
+
+| From (UTC) | Public IP | Note |
+|---|---|---|
+| 2026-11-08 01:34 | `37.189.69.85` | |
+| 2026-11-10 09:18 | `176.79.60.54` | changed after a line drop 09:11-09:21 |
+
+`tvwake-ipwatch.timer` (`agent/tvwake/ipwatch.py`) runs 3 min after boot and then every
+`IPWATCH_EVERY_H` (5) hours. It asks ipify / icanhazip / ident.me for the IPv4 address; a new address
+counts only if two of them agree. On a change it sends `ip.changed` to Telegram. State and the last
+20 addresses: `~/.local/state/tvwake/ipwatch.json`.
+
+```sh
+cd ~/tv-wake-launcher/agent && .venv/bin/python -m tvwake.ipwatch --env ../.env status   # history
+systemctl --user start tvwake-ipwatch       # check now
+```
+
+`IPWATCH_DNS_HOST` (optional) is a DNS name that should point at that address. If it doesn't, the
+message adds `dns.stale` (once per address). The watcher does **not** update DNS. A DuckDNS updater
+was started separately (the infra repo, `~/bin/ddns-duckdns.sh` on the helper, config
+`~/.config/duckdns/env`, still empty, not scheduled). Once it runs, set
+`IPWATCH_DNS_HOST=<name>.duckdns.org` so a failed update shows up here.

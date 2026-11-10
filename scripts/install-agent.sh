@@ -23,6 +23,7 @@ python3 -c 'import venv, ensurepip' 2>/dev/null || die "Python venv support miss
 
 MODE="${SYSTEMD_MODE:-user}"
 TICK_MIN="${DEVMODE_TICK_MIN:-5}"
+IPWATCH_H="${IPWATCH_EVERY_H:-5}"
 VENV="$ROOT/agent/.venv"
 PY="$VENV/bin/python"
 
@@ -44,10 +45,10 @@ info "checking the configuration"
 
 render() {  # render <template> <dest> <wanted_by> <user_line>
     sed -e "s|@ROOT@|$ROOT|g" -e "s|@PYTHON@|$PY|g" -e "s|@ENV_FILE@|$ENV_FILE|g" \
-        -e "s|@TICK_MIN@|$TICK_MIN|g" -e "s|@WANTED_BY@|$3|g" -e "s|@USER_LINE@|$4|g" "$1" > "$2"
+        -e "s|@TICK_MIN@|$TICK_MIN|g" -e "s|@IPWATCH_H@|$IPWATCH_H|g" -e "s|@WANTED_BY@|$3|g" -e "s|@USER_LINE@|$4|g" "$1" > "$2"
 }
 
-UNITS="tvwake-agent.service tvwake-devmode.service tvwake-devmode.timer"
+UNITS="tvwake-agent.service tvwake-devmode.service tvwake-devmode.timer tvwake-ipwatch.service tvwake-ipwatch.timer"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -71,9 +72,10 @@ fi
 
 info "installing systemd units ($MODE mode) in $DEST"
 "${SCTL[@]}" daemon-reload
-"${SCTL[@]}" enable tvwake-agent.service tvwake-devmode.timer >/dev/null
+"${SCTL[@]}" enable tvwake-agent.service tvwake-devmode.timer tvwake-ipwatch.timer >/dev/null
 "${SCTL[@]}" restart tvwake-agent.service
 "${SCTL[@]}" restart tvwake-devmode.timer
+"${SCTL[@]}" restart tvwake-ipwatch.timer
 
 info "waiting for the agent"
 URL="http://$HELPER_HOST:${HELPER_PORT:-8787}/health"
@@ -84,7 +86,8 @@ for _ in $(seq 1 20); do
         echo
         echo "Logs:            $J -u tvwake-agent -f"
         echo "Dev mode timer:  $J -u tvwake-devmode"
-        echo "Timer schedule:  systemctl$([ "$MODE" = user ] && echo ' --user') list-timers tvwake-devmode.timer"
+        echo "Public IP watch: $J -u tvwake-ipwatch   (every ${IPWATCH_H} h)"
+        echo "Timer schedule:  systemctl$([ "$MODE" = user ] && echo ' --user') list-timers 'tvwake-*'"
         exit 0
     fi
     sleep 0.5

@@ -98,6 +98,8 @@ class Config:
     # notifications
     telegram_bot_token: str
     telegram_chat_id: str
+    # public IP watcher: optional DNS name that should point at the home's public IP
+    ipwatch_dns_host: str
     raw: dict[str, str] = field(repr=False, default_factory=dict)
 
     @property
@@ -107,6 +109,10 @@ class Config:
     @property
     def devmode_token_file(self) -> Path:
         return self.state_dir / "devmode_token"
+
+    @property
+    def ipwatch_state_file(self) -> Path:
+        return self.state_dir / "ipwatch.json"
 
 
 def _get(env: dict[str, str], key: str, default: str | None = None) -> str:
@@ -229,6 +235,7 @@ def load_config(env: dict[str, str]) -> Config:
         pc_ssh=_get(env, "PC_SSH", ""),
         telegram_bot_token=_get(env, "TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=_get(env, "TELEGRAM_CHAT_ID", ""),
+        ipwatch_dns_host=_get(env, "IPWATCH_DNS_HOST", ""),
         raw=dict(env),
     )
 
@@ -247,5 +254,6 @@ KNOWN_KEYS = frozenset(
     QUIET_PERIOD_S POLL_INTERVAL_S BOOT_TIMEOUT_S STREAM_TIMEOUT_S MOCK_PC MOCK_BOOT_S
     MOCK_STREAM_S MOCK_FAIL MOCK_INITIALLY_ON MOCK_AUTO_OFF_S TV_IP TV_SSH_PORT TV_SSH_USER TV_SSH_KEY
     DEVMODE_RENEW_URL DEVMODE_CHECK_URL DEVMODE_RENEW_INTERVAL_H DEVMODE_EXTEND_INTERVAL_H
-    DEVMODE_CHECK_INTERVAL_H STATE_DIR LOG_LEVEL PC_SSH TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID""".split()
+    DEVMODE_CHECK_INTERVAL_H STATE_DIR LOG_LEVEL PC_SSH TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
+    IPWATCH_DNS_HOST IPWATCH_EVERY_H""".split()
 )

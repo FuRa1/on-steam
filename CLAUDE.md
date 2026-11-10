@@ -22,7 +22,7 @@ Hobby project: press "PC Game" on an LG TV → the helper (ThinkPad L590, Ubuntu
 - Edit here → `bash scripts/deploy.sh agent` (and/or `tv`): copies the repo and `.env` to the helper
   and reinstalls. For quick checks: `tar ... | ssh l590 'tar -x -C ~/tv-wake-launcher'`.
 - Tests run **on the helper**: `ssh l590 'cd ~/tv-wake-launcher/agent && .venv/bin/python -m pytest -q'`
-  (74 tests, all must pass). JS HMAC: `node tv-app/tests/hmac-test.js` (runs here).
+  (82 tests, all must pass). JS HMAC: `node tv-app/tests/hmac-test.js` (runs here).
 - Logs: `ssh l590 'journalctl --user -u tvwake-agent -n 50 -o cat'` (`tvwake-devmode` for renewal).
 - Test the wake flow without the TV: `scripts/agent-cli.sh wake` on the helper.
 - Apollo log on this PC: `C:\Program Files\Apollo\config\sunshine.log` (resolution, bitrate, codec per session).
@@ -59,7 +59,8 @@ Hobby project: press "PC Game" on an LG TV → the helper (ThinkPad L590, Ubuntu
 `agent/tvwake/`: `config.py` (.env parser + validation), `auth.py` (HMAC + replay cache), `wake.py`
 (state machine, `Clock` injected; tests use `FakeClock`), `probes.py`/`wol.py`/`mock.py`, `api.py`
 (FastAPI, CORS for `Origin: null`), `devmode.py` (timer tick), `tvpower.py`, `client.py`.
-`notify.py` (Telegram, optional), `power.py` (`POST /shutdown` for the "PC Off" app: ssh `PC_SSH`
+`notify.py` (Telegram, optional), `ipwatch.py` (public IP check every 5 h → Telegram on change, timer
+`tvwake-ipwatch`, OPERATIONS §11), `power.py` (`POST /shutdown` for the "PC Off" app: ssh `PC_SSH`
 `shutdown /s /f`). `tv-off-app/` = the "PC Off" icon (shares js/css with `tv-app/`; built by
 `scripts/tv-off-app.sh`, deploy target `tv-off`). `pc/events.ps1` (+ `install-events.ps1`): Apollo hooks + power events →
 Telegram; auto-sleep exists but is OFF since 2026-11-10 (`AUTOSLEEP=off`, OPERATIONS §9).
