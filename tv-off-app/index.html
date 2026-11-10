@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PC Off</title>
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    window.__twEarlyErrors = [];
+    window.onerror = function (msg) { window.__twEarlyErrors.push(String(msg)); };
+  </script>
+</head>
+<body>
+  <main class="screen">
+    <header class="head">
+      <h1 id="title">PC Off</h1>
+      <p id="banner" class="banner">Starting…</p>
+    </header>
+    <section id="error" class="error" hidden>
+      <p id="error-text"></p>
+    </section>
+    <div id="buttons" class="buttons"></div>
+  </main>
+  <footer class="footer">
+    <span id="f-helper"></span>
+    <span></span>
+    <span id="f-meta"></span>
+  </footer>
+
+  <!-- shared with the "PC Game" app (copied from tv-app/ at build time) -->
+  <script src="config.js"></script>
+  <script src="js/lib/webOSTV.js"></script>
+  <script src="js/lib/sha256.js"></script>
+  <script src="js/hmac.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/luna.js"></script>
+  <script src="js/off.js"></script>
+</body>
+</html>

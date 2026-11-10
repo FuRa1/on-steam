@@ -4,6 +4,8 @@ GET  /health          unauthenticated: {ok, version, server_time, mock}
 POST /wake            start or join the wake job: {job_id}
 GET  /jobs/{job_id}   job state
 GET  /devmode         dev mode session info from the renewal state file
+GET  /pc              {up}: does the PC answer ping (the "PC Off" app waits for false)
+POST /shutdown        shut the PC down now: {state: "sent" | "off"} ("off" = it was off already)
 
 The TV app runs from a file:// origin (Origin: null) and sends custom headers, so the
 browser does a CORS preflight. We allow any origin: authentication is the HMAC signature,
@@ -18,7 +20,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from . import __version__, devmode
+from . import __version__, devmode, power
 from .auth import AuthError, Verifier
 from .config import Config
 from .wake import WakeManager
@@ -77,6 +79,20 @@ def create_app(cfg: Config, manager: WakeManager) -> FastAPI:
             # e.g. the helper restarted; the TV app then starts a new job.
             raise HTTPException(404, detail={"error": "unknown job"})
         return j.to_dict(manager.now())
+
+    @app.get("/pc", dependencies=[Depends(require_auth)])
+    async def pc() -> dict:
+        return {"up": await power.pc_is_up(cfg, manager.probes)}
+
+    @app.post("/shutdown", dependencies=[Depends(require_auth)])
+    async def shutdown(request: Request) -> dict:
+        log.info("shutdown requested by %s (%s)", request.client.host if request.client else "?",
+                 request.headers.get("x-client", "unknown client"))
+        try:
+            state = await power.shutdown(cfg, manager.probes)
+        except power.PowerError as e:
+            raise HTTPException(502, detail={"error": str(e)}) from None
+        return {"state": state}
 
     @app.get("/devmode", dependencies=[Depends(require_auth)])
     async def devmode_info() -> dict:

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Draw the app icons (icon.png 80x80, largeIcon.png 130x130) with only the standard library.
 
-A blue rounded square with a white ring and a "play" triangle. Replace the PNGs with your
-own art if you like; build-tv.sh only regenerates them when they are missing.
+A blue rounded square with a white ring and a "play" triangle ("PC Game"), or with --power the
+power symbol on the same square ("PC Off"). Replace the PNGs with your own art if you like; the
+build scripts only regenerate them when they are missing.
 """
+
+import math
 
 import struct
 import sys
@@ -32,12 +35,28 @@ def in_triangle(u, v):
     return not (neg and pos)
 
 
+def in_power(u, v):
+    """The power symbol: a ring open at the top and a bar through the gap."""
+    du, dv = u - 0.5, v - 0.53
+    d = math.hypot(du, dv)
+    angle = math.degrees(math.atan2(du, -dv))  # 0 = straight up
+    ring = 0.215 <= d <= 0.275 and abs(angle) > 38
+    bar = abs(du) <= 0.03 and 0.17 <= v <= 0.50
+    return ring or bar
+
+
+POWER = False
+
+
 def sample(u, v):
     """RGBA of one point (u, v in 0..1)."""
     if not in_rounded_square(u, v):
         return (0, 0, 0, 0)
     d2 = (u - 0.5) ** 2 + (v - 0.5) ** 2
-    if 0.30 ** 2 <= d2 <= 0.355 ** 2 or in_triangle(u, v):
+    if POWER:
+        if in_power(u, v):
+            return WHITE + (255,)
+    elif 0.30 ** 2 <= d2 <= 0.355 ** 2 or in_triangle(u, v):
         return WHITE + (255,)
     col = tuple(round(t + (b - t) * v) for t, b in zip(TOP, BOTTOM))
     return col + (255,)
@@ -74,7 +93,9 @@ def png(size):
 
 
 if __name__ == "__main__":
-    out = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
+    args = [a for a in sys.argv[1:] if a != "--power"]
+    POWER = "--power" in sys.argv[1:]
+    out = Path(args[0] if args else ".")
     (out / "icon.png").write_bytes(png(80))
     (out / "largeIcon.png").write_bytes(png(130))
     print(f"wrote {out / 'icon.png'} and {out / 'largeIcon.png'}")

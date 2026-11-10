@@ -10,3 +10,5 @@ tv-app/config.js
 tv-app/appinfo.json
 tv-app/js/lib/webOSTV.js
 env
+tv-off-app/config.js
+tv-off-app/appinfo.json

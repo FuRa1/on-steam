@@ -85,3 +85,32 @@ def test_cors_preflight_from_file_origin(make_cfg):
     assert r.status_code == 200
     assert r.headers["access-control-allow-origin"] in ("*", "null")
     assert "x-signature" in r.headers["access-control-allow-headers"].lower()
+
+
+def test_shutdown_requires_auth(make_cfg):
+    c = client(make_cfg)
+    assert c.post("/shutdown").status_code == 401
+    assert c.get("/pc").status_code == 401
+
+
+def test_shutdown_mock_pc(make_cfg):
+    c = client(make_cfg)
+    assert c.get("/pc", headers=headers("GET", "/pc")).json() == {"up": True}
+    r = c.post("/shutdown", headers=headers("POST", "/shutdown"))
+    assert r.status_code == 200 and r.json() == {"state": "sent"}
+    # a different timestamp: the same request signed in the same second is rejected as a replay
+    assert c.get("/pc", headers=headers("GET", "/pc", ts=time.time() - 1)).json() == {"up": False}
+    # pressing it again: the PC is off already
+    r = c.post("/shutdown", headers=headers("POST", "/shutdown", ts=time.time() - 1))
+    assert r.json() == {"state": "off"}
+
+
+def test_shutdown_needs_pc_ssh(make_cfg):
+    from tvwake.mock import MockPC as _Mock
+
+    cfg = make_cfg()  # not mock mode, no PC_SSH
+    clock = Clock()
+    c = TestClient(create_app(cfg, WakeManager(cfg, _Mock(clock, 0, 0, initially_on=True), clock)))
+    r = c.post("/shutdown", headers=headers("POST", "/shutdown"))
+    assert r.status_code == 502
+    assert "PC_SSH" in r.json()["detail"]["error"]

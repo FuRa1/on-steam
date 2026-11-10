@@ -46,7 +46,9 @@ def main(app_dir: Path) -> None:
     max_wait = num("BOOT_TIMEOUT_S", 150) + num("STREAM_TIMEOUT_S", 90) + 60
 
     config = {
+        "appId": env("APP_ID"),
         "appTitle": env("APP_TITLE"),
+        "pcName": env("PC_NAME", "the PC"),
         "version": env("APP_VERSION", "1.0.0"),
         "helperUrl": f"http://{env('HELPER_HOST')}:{env('HELPER_PORT', '8787')}",
         "secret": env("SHARED_SECRET"),

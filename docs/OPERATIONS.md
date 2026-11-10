@@ -91,7 +91,9 @@ From the workstation (Git Bash in `C:\workspace\on-steam`):
 scripts/deploy.sh agent        # copy repo + .env to the helper, (re)install agent + timer
 scripts/deploy.sh tv           # build the IPK on the helper and install it on the TV
 scripts/deploy.sh agent tv     # both
+scripts/deploy.sh tv-off       # the "PC Off" app (separate IPK; never touches "PC Game")
 ```
+From the MacBook the config is `env`: `HELPER_SSH=l590 ENV_FILE=env scripts/deploy.sh agent`.
 Tests: on the helper `cd agent && .venv/bin/python -m pytest -q` (65 tests);
 `node tv-app/tests/hmac-test.js`.
 
@@ -270,6 +272,10 @@ Open:
 
 ## 9. PC events: Telegram + sleep when a stream is over (2026-11-09)
 
+**2026-11-10: auto-sleep is OFF** (`AUTOSLEEP=off`; it caused more trouble than it solved). The
+Telegram messages below stay; the sleep/shutdown rows and the countdown don't happen. To turn the PC
+off by hand from the sofa use the **"PC Off"** app (§10).
+
 Everything runs **on the PC**, driven by events; nothing polls. The helper is never put to sleep.
 
 | Event | Fired by | Telegram |
@@ -332,3 +338,20 @@ with or without a BOM.
   Notifications). The token is in `.env` on the MacBook (`env`), the helper and the PC; never commit it.
 - `QUIET_PERIOD_S=0`: the agent starts checking right after WoL (a sleeping PC answers in seconds).
 
+
+## 10. "PC Off" app: shut the PC down from the TV (2026-11-10)
+
+A second icon next to "PC Game" (`tv-off-app/`, id `com.home.tvwake.off`, built by
+`scripts/tv-off-app.sh`, installed with `scripts/deploy.sh tv-off`). It shares css/js with `tv-app/`
+but has its own build; `tv-app/` and its IPK are not touched.
+
+- Opens → `GET /pc` (agent pings the PC). Off already → "MoralMe is already off", closes.
+- On → asks "Turn off MoralMe?" with **Cancel focused** (OK on the remote does nothing harmful), and
+  tries the TV's own system popup (`com.webos.notification/createAlert`, ACG `notification.operation`);
+  its "Turn off" button relaunches the app with `{action: "shutdown"}`. If the TV refuses the popup,
+  the on-screen buttons are the confirmation.
+- Turn off → `POST /shutdown` → the agent runs `ssh $PC_SSH shutdown /s /f /t 0` (the helper's admin key
+  on the PC, alias `moralme`), then the app polls `GET /pc` until the PC stops answering ("MoralMe is
+  off", closes after 4 s). Forced on purpose: the button is for when something hangs. Telegram:
+  `pc.off` from the PC's Shutdown task.
+- Back exits at any time; a shutdown already sent goes on.

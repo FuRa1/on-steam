@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # From your workstation: copy the project (and .env) to the helper over SSH, then install.
 #
-# Usage: scripts/deploy.sh [agent] [tv]      (default: agent)
-#   agent  copy + install-agent.sh on the helper
-#   tv     copy + build-tv.sh + install-tv.sh on the helper (the webOS CLI lives there)
+# Usage: scripts/deploy.sh [agent] [tv] [tv-off]      (default: agent)
+#   agent   copy + install-agent.sh on the helper
+#   tv      copy + build-tv.sh + install-tv.sh on the helper (the webOS CLI lives there)
+#   tv-off  copy + tv-off-app.sh --install (the "PC Off" app)
 #
 # Needs HELPER_SSH (an ssh host alias or user@host) and HELPER_DIR in .env.
 set -euo pipefail
@@ -26,6 +27,7 @@ for t in "${TARGETS[@]}"; do
     case "$t" in
         agent) ssh "$HELPER_SSH" "cd '$DIR' && bash scripts/install-agent.sh" ;;
         tv)    ssh "$HELPER_SSH" "cd '$DIR' && bash scripts/build-tv.sh && bash scripts/install-tv.sh" ;;
-        *)     die "unknown target '$t' (use agent and/or tv)" ;;
+        tv-off) ssh "$HELPER_SSH" "cd '$DIR' && bash scripts/tv-off-app.sh --install" ;;
+        *)     die "unknown target '$t' (use agent, tv and/or tv-off)" ;;
     esac
 done
