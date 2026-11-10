@@ -383,8 +383,13 @@ cd ~/tv-wake-launcher/agent && .venv/bin/python -m tvwake.ipwatch --env ../.env 
 systemctl --user start tvwake-ipwatch       # check now
 ```
 
-`IPWATCH_DNS_HOST` (optional) is a DNS name that should point at that address. If it doesn't, the
-message adds `dns.stale` (once per address). The watcher does **not** update DNS. A DuckDNS updater
-was started separately (the infra repo, `~/bin/ddns-duckdns.sh` on the helper, config
-`~/.config/duckdns/env`, still empty, not scheduled). Once it runs, set
-`IPWATCH_DNS_HOST=<name>.duckdns.org` so a failed update shows up here.
+**DNS name: `moralmachine.duckdns.org`** (DuckDNS, set up 2026-11-10). Updated by
+`~/bin/ddns-duckdns.sh` on the helper (source: infra repo `scripts/ddns-duckdns.sh`), cron `*/5`.
+It takes the public IP from `tailscale status --json` (local; ipify etc. only as a fallback) and calls
+DuckDNS **only when the IP changed** (or the last call failed). Telegram: `ddns.update <name> → <ip>
+(was <old>)`, once `ddns.error` per failure streak. Config `~/.config/duckdns/env` (domain + token,
+mode 600, never in git); the bot token is read from `~/tv-wake-launcher/.env`. Logs:
+`~/.local/state/ddns/ddns.log`, `ip-history.log`.
+
+`IPWATCH_DNS_HOST=moralmachine.duckdns.org`: the 5-hourly check also resolves the name and sends
+`dns.stale` (once per address) if it doesn't point at the current IP, i.e. the updater is broken.
