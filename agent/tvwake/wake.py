@@ -42,6 +42,7 @@ class Stage:
     message: str = ""
     started_at: float | None = None
     finished_at: float | None = None
+    checks: int = 0  # PC probes made in this stage (the TV pulses on each new one)
 
     def to_dict(self, now: float) -> dict:
         elapsed = None
@@ -55,6 +56,7 @@ class Stage:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "elapsed_s": elapsed,
+            "checks": self.checks,
         }
 
 
@@ -214,6 +216,7 @@ class WakeManager:
             elapsed = self.clock.monotonic() - start
             if elapsed >= cfg.quiet_period_s:
                 st.message = "Waiting for the PC to answer…"
+                st.checks += 1
                 if await self._pc_answers():
                     self._ok(st, "The PC is up.")
                     return True
@@ -244,6 +247,7 @@ class WakeManager:
         self._begin(st, f"Waiting for port {cfg.stream_port}…")
         start = self.clock.monotonic()
         while True:
+            st.checks += 1
             if await self.probes.tcp_open(cfg.pc_ip, cfg.stream_port):
                 self._ok(st, f"The {cfg.stream_app_title} server is ready.")
                 return True

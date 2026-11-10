@@ -22,7 +22,7 @@ Hobby project: press "PC Game" on an LG TV → the helper (ThinkPad L590, Ubuntu
 - Edit here → `bash scripts/deploy.sh agent` (and/or `tv`): copies the repo and `.env` to the helper
   and reinstalls. For quick checks: `tar ... | ssh l590 'tar -x -C ~/tv-wake-launcher'`.
 - Tests run **on the helper**: `ssh l590 'cd ~/tv-wake-launcher/agent && .venv/bin/python -m pytest -q'`
-  (85 tests, all must pass). JS HMAC: `node tv-app/tests/hmac-test.js` (runs here).
+  (86 tests, all must pass). JS HMAC: `node tv-app/tests/hmac-test.js` (runs here).
 - Logs: `ssh l590 'journalctl --user -u tvwake-agent -n 50 -o cat'` (`tvwake-devmode` for renewal).
 - Test the wake flow without the TV: `scripts/agent-cli.sh wake` on the helper.
 - Apollo log on this PC: `C:\Program Files\Apollo\config\sunshine.log` (resolution, bitrate, codec per session).

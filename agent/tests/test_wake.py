@@ -207,3 +207,14 @@ def test_notify_line_escapes_details():
 
     assert line("✕", "pc.error", "port <47989> & co") == "🔴 <code>✕ pc.error</code> port &lt;47989&gt; &amp; co"
     assert line("⏻", "pc.on") == "<code>⏻ pc.on</code>"  # no mark defined for this key in the agent
+
+
+def test_stages_count_their_checks(make_cfg):
+    # The TV pulses once per check, so the count must match the real probes.
+    clock = FakeClock()
+    pc = FakePC(clock, ping_at=45, stream_at=70)
+    job = run_job(make_cfg(), pc, clock)
+    boot = job.stage("boot").to_dict(clock.wall())
+    assert boot["checks"] == len(pc.ping_times) - 1  # minus the first "already up?" check
+    assert job.stage("stream").checks >= 2
+    assert job.stage("wake").to_dict(clock.wall())["checks"] == 0

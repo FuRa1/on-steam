@@ -104,9 +104,35 @@ html, body {
 .stage.pending .title, .stage.skipped .title { color: var(--muted); }
 .stage.skipped .icon::before { content: "–"; color: var(--muted); }
 
+/* Running: a breathing dot; each real PC check sends a ripple out of it (sonar), see pulse() */
+.stage .icon { position: relative; }
 .stage.running .icon {
-  border-color: var(--accent) transparent var(--accent) transparent;
-  animation: spin 1.2s linear infinite;
+  border-color: var(--accent);
+  animation: breathe 2s ease-in-out infinite;
+}
+.stage.running .icon::before {
+  content: "";
+  width: 1.3vh;
+  height: 1.3vh;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.ripple {
+  position: absolute;
+  inset: -0.35vh;
+  border-radius: 50%;
+  border: 0.35vh solid var(--accent);
+  pointer-events: none;
+  animation: ripple 1.5s ease-out forwards;
+}
+.ripple.ok { border-color: var(--ok); }
+@keyframes ripple {
+  from { transform: scale(1); opacity: 0.9; }
+  to { transform: scale(2.8); opacity: 0; }
+}
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(78, 161, 255, 0); }
+  50% { box-shadow: 0 0 1.4vh 0.3vh rgba(78, 161, 255, 0.5); }
 }
 .stage.running .title { color: var(--text); font-weight: 600; }
 

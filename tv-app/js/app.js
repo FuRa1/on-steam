@@ -53,7 +53,7 @@
 
   function resetStages() {
     app.stages = stageDefs().map(function (d) {
-      return { id: d.id, title: d.title, state: "pending", message: "", elapsed: null, since: null };
+      return { id: d.id, title: d.title, state: "pending", message: "", elapsed: null, since: null, checks: 0 };
     });
     var list = $("stages");
     list.innerHTML = "";
@@ -99,6 +99,15 @@
     li.querySelector(".time").textContent = formatElapsed(s);
   }
 
+  function pulse(id, kind) {
+    var icon = document.querySelector("#stage-" + id + " .icon");
+    if (!icon || document.hidden) return;
+    var r = document.createElement("span");
+    r.className = "ripple" + (kind ? " " + kind : "");
+    icon.appendChild(r);
+    setTimeout(function () { if (r.parentNode) r.parentNode.removeChild(r); }, 1600);
+  }
+
   function formatElapsed(s) {
     var secs = null;
     if (s.state === "running") {
@@ -122,6 +131,11 @@
       var s = stage(js.id);
       if (!s) return;
       if (js.state === "running" && s.state !== "running") s.started = Date.now();
+      // A ripple per real PC check (the helper counts them), a green one when the stage succeeds.
+      var checks = js.checks || 0;
+      if (js.state === "running" && checks > s.checks) pulse(js.id, "");
+      else if (js.state === "ok" && s.state === "running") pulse(js.id, "ok");
+      s.checks = checks;
       s.state = js.state;
       s.message = js.message || "";
       s.elapsed = js.elapsed_s;
